@@ -17,18 +17,41 @@ def send_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-def get_nifty_price():
-    url = "https://www.nseindia.com/api/quote-equity?symbol=NIFTY%2050"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Referer": "https://www.nseindia.com/"
-    }
-    s = requests.Session()
-    s.get("https://www.nseindia.com", headers=headers)
-    r = s.get(url, headers=headers)
-    data = r.json()
-    return float(data["priceInfo"]["lastPrice"])
+def get_price_from_nse():
+    try:
+        url = "https://www.nseindia.com/api/quote-equity?symbol=NIFTY 50"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Referer": "https://www.nseindia.com/"
+        }
+        s = requests.Session()
+        s.get("https://www.nseindia.com", headers=headers)
+        r = s.get(url, headers=headers)
+        data = r.json()
+        return float(data["priceInfo"]["lastPrice"])
+    except:
+        return None
+
+def get_price_from_yahoo():
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1m"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = r.json()
+        return float(data["chart"]["result"][0]["meta"]["regularMarketPrice"])
+    except:
+        return None
+
+def get_price():
+    p = get_price_from_nse()
+    if p is not None:
+        print("Fetched from NSE")
+        return p
+    print("NSE failed… trying Yahoo")
+    p = get_price_from_yahoo()
+    if p is not None:
+        print("Fetched from Yahoo")
+    return p
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -62,7 +85,12 @@ while True:
             time.sleep(SLEEP_SECONDS)
             continue
 
-        price = get_nifty_price()
+        price = get_price()
+        if price is None:
+            print("No price source available.")
+            time.sleep(SLEEP_SECONDS)
+            continue
+
         state["prices"].append(price)
         if len(state["prices"]) > 50:
             state["prices"] = state["prices"][-50:]

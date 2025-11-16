@@ -1,8 +1,5 @@
-# NIFTY SMA 9/21 Alert Bot
+# NIFTY SMA Bot with NSE + Yahoo Failover
 
-Runs on Render as a Background Worker.
-
-Edit environment variables:
-- BOT_TOKEN
-- CHAT_ID
-- SLEEP_SECONDS
+This bot will:
+- Try NSE API first
+- If NSE fails (cookies / rate limit), it automatically falls back to Yahoo Finance
