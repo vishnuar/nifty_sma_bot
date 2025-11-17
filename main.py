@@ -17,22 +17,6 @@ def send_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-def get_price_from_nse():
-    try:
-        url = "https://www.nseindia.com/api/quote-equity?symbol=NIFTY 50"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json",
-            "Referer": "https://www.nseindia.com/"
-        }
-        s = requests.Session()
-        s.get("https://www.nseindia.com", headers=headers)
-        r = s.get(url, headers=headers)
-        data = r.json()
-        return float(data["priceInfo"]["lastPrice"])
-    except:
-        return None
-
 def get_price_from_yahoo():
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1m"
@@ -43,11 +27,7 @@ def get_price_from_yahoo():
         return None
 
 def get_price():
-    p = get_price_from_nse()
-    if p is not None:
-        print("Fetched from NSE")
-        return p
-    print("NSE failed… trying Yahoo")
+    print("Fetching Yahoo price...")
     p = get_price_from_yahoo()
     if p is not None:
         print("Fetched from Yahoo")
@@ -72,18 +52,18 @@ def calc_sma(values, period):
 # FIXED MARKET TIME FUNCTION (UTC → IST conversion)
 # ========================================================
 def is_market_time():
-    now_utc = datetime.datetime.now(datetime.timezone.utc)   # <<< changed
-    weekday = now_utc.weekday()                              # <<< changed
-    current_time = now_utc.time()                            # <<< changed
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    weekday = now_utc.weekday()
+    current_time = now_utc.time()
 
     if weekday >= 5:
         return False
 
     # IST 09:30–15:30 → UTC 04:00–10:00
-    market_open = datetime.time(4, 0)   # <<< changed
-    market_close = datetime.time(10, 0) # <<< changed
+    market_open = datetime.time(4, 0)
+    market_close = datetime.time(10, 0)
 
-    return market_open <= current_time <= market_close        # <<< changed
+    return market_open <= current_time <= market_close
 
 # ========================================================
 # MAIN LOOP
@@ -99,12 +79,12 @@ while True:
 
         price = get_price()
         if price is None:
-            print("No price source available.")
+            print("No price available.")
             time.sleep(SLEEP_SECONDS)
             continue
 
-        print(price)
-        
+        print("Price:", price)
+
         state["prices"].append(price)
         if len(state["prices"]) > 50:
             state["prices"] = state["prices"][-50:]
@@ -112,10 +92,10 @@ while True:
         sma9 = calc_sma(state["prices"], 9)
         sma21 = calc_sma(state["prices"], 21)
 
-        print("sma9" + sma9)
-        print("sma21" + sma21)
+        print(f"sma9 = {sma9}")
+        print(f"sma21 = {sma21}")
 
-        if sma9 and sma21:
+        if sma9 is not None and sma21 is not None:
             if sma9 > sma21 and state["last_signal"] != "buy":
                 send_telegram(f"BUY Signal — SMA9 crossed above SMA21\nPrice: {price}")
                 state["last_signal"] = "buy"
