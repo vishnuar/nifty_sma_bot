@@ -11,6 +11,10 @@ SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
 STATE_FILE = "state.json"
 
 def send_telegram(msg):
+
+    print(BOT_TOKEN)
+    print(CHAT_ID)
+
     if not BOT_TOKEN or not CHAT_ID:
         print("Missing Telegram config")
         return
