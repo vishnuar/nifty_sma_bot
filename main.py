@@ -68,14 +68,26 @@ def calc_sma(values, period):
         return None
     return sum(values[-period:]) / period
 
+# ========================================================
+# FIXED MARKET TIME FUNCTION (UTC → IST conversion)
+# ========================================================
 def is_market_time():
-    now = datetime.datetime.now(datetime.timezone.utc).time()
-    if now.weekday() >= 5:
-        return False
-    start = now.replace(hour=9, minute=30)
-    end = now.replace(hour=15, minute=30)
-    return start <= now <= end
+    now_utc = datetime.datetime.now(datetime.timezone.utc)   # <<< changed
+    weekday = now_utc.weekday()                              # <<< changed
+    current_time = now_utc.time()                            # <<< changed
 
+    if weekday >= 5:
+        return False
+
+    # IST 09:30–15:30 → UTC 04:00–10:00
+    market_open = datetime.time(4, 0)   # <<< changed
+    market_close = datetime.time(10, 0) # <<< changed
+
+    return market_open <= current_time <= market_close        # <<< changed
+
+# ========================================================
+# MAIN LOOP
+# ========================================================
 state = load_state()
 
 while True:
