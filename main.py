@@ -110,6 +110,9 @@ while True:
         sma9 = calc_sma(state["prices"], 9)
         sma21 = calc_sma(state["prices"], 21)
 
+        print("sma9" + sma9)
+        print("sma21" + sma21)
+
         if sma9 and sma21:
             if sma9 > sma21 and state["last_signal"] != "buy":
                 send_telegram(f"BUY Signal — SMA9 crossed above SMA21\nPrice: {price}")
