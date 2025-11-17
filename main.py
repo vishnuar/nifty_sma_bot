@@ -10,6 +10,9 @@ SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
 
 STATE_FILE = "state.json"
 
+print(BOT_TOKEN)
+print(CHAT_ID)
+
 def send_telegram(msg):
 
     print(BOT_TOKEN)
