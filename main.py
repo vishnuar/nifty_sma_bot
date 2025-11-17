@@ -103,6 +103,8 @@ while True:
             time.sleep(SLEEP_SECONDS)
             continue
 
+        print(price)
+        
         state["prices"].append(price)
         if len(state["prices"]) > 50:
             state["prices"] = state["prices"][-50:]
