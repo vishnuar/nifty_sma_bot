@@ -69,7 +69,7 @@ def calc_sma(values, period):
     return sum(values[-period:]) / period
 
 def is_market_time():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc).time()
     if now.weekday() >= 5:
         return False
     start = now.replace(hour=9, minute=30)
