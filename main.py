@@ -4,8 +4,8 @@ import json
 import datetime
 import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
 
 STATE_FILE = "state.json"
