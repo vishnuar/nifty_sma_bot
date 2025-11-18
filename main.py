@@ -126,6 +126,14 @@ Return the response in plain text.
 """
 
     try:
+
+        print(OPENAI_API_KEY)
+        print(signal_type)
+        print(price)
+        print(sma9)
+        print(sma21)
+        print(option_chain)
+
         r = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
