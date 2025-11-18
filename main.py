@@ -91,7 +91,7 @@ def is_market_time():
 # ---------------------------------------------------------
 def get_option_chain():
     try:
-        data = nse_optionchain_scrape("NIFTY")
+        data = nse_optionchain_scrapper("NIFTY")
         return data
     except Exception as e:
         print("Option chain error:", e)
