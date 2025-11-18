@@ -3,7 +3,7 @@ import time
 import json
 import datetime
 import os
-from nsepython import nse_optionchain_scrape
+from nsepython import nse_optionchain_scrapper
 
 # ---------------------------------------------------------
 # CONFIG
