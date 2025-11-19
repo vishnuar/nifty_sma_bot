@@ -3,21 +3,42 @@ import time
 import json
 import datetime
 import os
+import logging
+import sys
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type 
 from nsepython import nse_optionchain_scrapper
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
-# The 'datetime' import is correctly available from the previous imports.
+
+# ---------------------------------------------------------
+## ⚙️ LOGGING SETUP (Console Only)
+# ---------------------------------------------------------
+# Configure logging to output only to the console (sys.stdout)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
 ## ⚙️ CONFIGURATION & INITIALIZATION
 # ---------------------------------------------------------
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
+try:
+    SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
+except ValueError:
+    SLEEP_SECONDS = 60
+    logger.warning("SLEEP_SECONDS environment variable is invalid. Defaulting to 60 seconds.")
+
 
 # Gemini API is used for AI Analysis
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Sticking with Flash for speed unless stability issues persist
 GEMINI_MODEL = "gemini-2.5-flash" 
 
 STATE_FILE = "state.json"
@@ -25,70 +46,69 @@ STATE_FILE = "state.json"
 try:
     # Initialize the client globally
     client = genai.Client(api_key=GEMINI_API_KEY)
-    print("✅ Gemini client initialized successfully.")
+    logger.info("✅ Gemini client initialized successfully.")
 except Exception as e:
-    print(f"❌ Error initializing Gemini client: {e}")
-    # If the client can't initialize, we exit as the core feature won't work.
-    exit(1) # Use exit(1) to signal an error state
+    logger.error(f"❌ Error initializing Gemini client: {e}. Exiting script.")
+    exit(1)
 
 # ---------------------------------------------------------
-## 💬 TELEGRAM
+## 💬 TELEGRAM & STATE UTILITIES
 # ---------------------------------------------------------
 def send_telegram(msg: str):
     """Sends a message to the configured Telegram chat."""
     if not BOT_TOKEN or not CHAT_ID:
-        # Using print for debugging if Telegram is not configured
-        print("⚠️ Missing Telegram config (BOT_TOKEN or CHAT_ID). Message not sent.")
-        print(f"TELEGRAM MESSAGE: {msg}")
+        logger.warning(f"⚠️ Missing Telegram config. Content: {msg.strip().replace('\n', ' ')}")
         return
         
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
-        # Use Markdown parsing mode for better message formatting
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        logger.info("Telegram message sent successfully.")
     except Exception as e:
-        print("❌ Telegram send error:", e)
+        logger.error(f"❌ Telegram send error: {e}")
 
-# ---------------------------------------------------------
-## 💰 PRICE FETCHING & STATE
-# ---------------------------------------------------------
 def get_price_from_yahoo() -> Optional[float]:
     """Fetches the Nifty spot price from Yahoo Finance."""
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1m"
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
         data = r.json()
         return float(data["chart"]["result"][0]["meta"]["regularMarketPrice"])
     except Exception as e:
-        print(f"❌ Error fetching price from Yahoo: {e}")
+        logger.error(f"❌ Error fetching price from Yahoo: {e}")
         return None
 
 def get_price() -> Optional[float]:
     """Retrieves the price, logging the source."""
     p = get_price_from_yahoo()
     if p is not None:
-        print(f"✅ Fetched price: {p}")
+        logger.info(f"✅ Fetched price: {p:.2f}")
     return p
 
 def load_state() -> Dict[str, Any]:
     """Loads price history and last signal from state file."""
     if not os.path.exists(STATE_FILE):
+        logger.info("State file not found. Initializing new state.")
         return {"last_signal": None, "prices": []}
     try:
         with open(STATE_FILE, "r") as f:
-            return json.load(f)
+            state = json.load(f)
+            logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
+            return state
     except Exception as e:
-        print(f"❌ Error loading state file: {e}")
+        logger.error(f"❌ Error loading state file, resetting state: {e}")
         return {"last_signal": None, "prices": []}
 
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+        logger.debug("State saved successfully.")
+    except Exception as e:
+        logger.error(f"❌ Error saving state file: {e}")
 
-# ---------------------------------------------------------
-## 📊 SMA & MARKET CHECK
-# ---------------------------------------------------------
 def calc_sma(values: List[float], period: int) -> Optional[float]:
     """Calculates the Simple Moving Average (SMA)."""
     if len(values) < period:
@@ -96,83 +116,92 @@ def calc_sma(values: List[float], period: int) -> Optional[float]:
     return sum(values[-period:]) / period
 
 def is_market_time() -> bool:
-    """Checks if the current time (converted to IST) is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST)."""
-    # NOTE: This uses a simplified UTC check (4:00 to 10:00 UTC) which corresponds to 9:30 AM to 3:30 PM IST.
-    # The market actually opens at 9:15 AM IST (3:45 UTC), but 9:30 AM (4:00 UTC) is close enough for a simple script.
-    
+    """Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST)."""
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     weekday = now_utc.weekday()
-    
-    # Check for Saturday (5) and Sunday (6)
     if weekday >= 5:
         return False
-
-    # Define time boundaries in UTC
-    market_open_utc = datetime.time(3, 45)  # 09:15 IST
-    market_close_utc = datetime.time(10, 0) # 15:30 IST
-
+    market_open_utc = datetime.time(3, 45) 
+    market_close_utc = datetime.time(10, 0)
     return market_open_utc <= now_utc.time() <= market_close_utc
 
-# ---------------------------------------------------------
-## 📈 OPTION CHAIN (NSEPYNTHON)
-# ---------------------------------------------------------
 def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
-    """
-    Fetches NIFTY options data, calculates ATM, and filters strikes around ATM 
-    for the closest available expiry date.
-    """
+    """Fetches NIFTY options data and filters strikes around ATM."""
     try:
-        # Fetch the full option chain
         data = nse_optionchain_scrapper("NIFTY")
-        
         spot_price = data['records']['underlyingValue']
         option_data = data['records']['data']
-
-        # Get the closest expiry date directly from the fetched data
         expiry_dates = data['records']['expiryDates']
         if not expiry_dates:
-            print("❌ Error: No expiry dates found in the NSE data.")
+            logger.warning("❌ No expiry dates found in the NSE data.")
             return None
             
         expiry = expiry_dates[0] 
-        print(f"✅ Using closest expiry: {expiry}")
-
-        # Calculate ATM strike (nearest 50 for NIFTY)
         atm = round(spot_price / 50) * 50
-
-        # ATM ±3 strikes (step 50). This results in a total of 7 strikes.
         strikes_needed = [atm + i*50 for i in range(-3, 4)] 
 
-        # Filter only required strikes for the closest expiry
         filtered_records = [
             record for record in option_data 
             if record['strikePrice'] in strikes_needed and record['expiryDate'] == expiry
         ]
+        
+        logger.info(f"Filtered {len(filtered_records)} option records around ATM {atm}.")
 
         return {
             "spot": spot_price,
             "atm": atm,
-            "required_strikes": strikes_needed,
             "expiry": expiry,
-            "records": filtered_records # This is the list the AI function needs
+            "records": filtered_records
         }
     except Exception as e:
-        print(f"❌ Error fetching NSE data: {e}")
+        logger.error(f"❌ Error fetching or processing NSE data: {e}")
         return None
 
-# ---------------------------------------------------------
-## 🤖 AI ANALYSIS (GEMINI)
-# ---------------------------------------------------------
 def prepare_gemini_prompt(strike_data: List[Dict[str, Any]]) -> str:
     """Converts filtered strike data into a focused JSON string for the prompt."""
     return json.dumps(strike_data, indent=2)
 
+# ---------------------------------------------------------
+## 🤖 AI ANALYSIS (GEMINI) - WITH TENACITY BACKOFF
+# ---------------------------------------------------------
+
+# Configure the Exponential Backoff Strategy
+@retry(
+    # Use exponential backoff (2s, 4s, 8s, 16s, etc. up to max 60s)
+    wait=wait_exponential(multiplier=1, min=2, max=60), 
+    # Give up after 5 total attempts
+    stop=stop_after_attempt(5),
+    # Only retry if the exception type is APIError (which includes 503)
+    retry=retry_if_exception_type(APIError)
+)
+def _call_gemini_with_retry(client, model, contents, config):
+    """
+    Internal function to call the Gemini API, wrapped with the tenacity retry logic.
+    If it fails with a 503, tenacity will catch the APIError and retry.
+    """
+    
+    # Log the retry attempt (tenacity handles the logging internally but this confirms the call)
+    logger.debug("Executing Gemini API call...")
+    
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=config
+    )
+    
+    # Check for immediate feedback if the API call succeeded but had issues
+    # Note: For 503, the client usually raises an APIError immediately.
+    logger.debug("Gemini call completed successfully.")
+    return response.text
+
+
 def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str) -> str:
     """
-    Evaluates a trading signal and Nifty Options Chain using the Gemini API.
+    Evaluates a trading signal and Nifty Options Chain using the Gemini API, 
+    managing retries for transient errors.
     """
     if not client:
-        return "AI error: Gemini client is not initialized. Check API Key."
+        return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
@@ -180,8 +209,8 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 Input:
 Signal: {signal_type}
 Spot Price: {price}
-SMA9: {sma9}
-SMA21: {sma21}
+SMA9: {sma9:.2f}
+SMA21: {sma21:.2f}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
@@ -198,9 +227,11 @@ Return the response in **plain text** only. The response MUST start with the Con
 Example desired format:
 Confidence: High. Signal is Good. Strike Price: 25000. Option: CE. Reason: The Options Chain shows strong PE OI building at 25000, confirming the bullish SMA cross.
 """
-    
+
     try:
-        response = client.models.generate_content(
+        logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
+        response_text = _call_gemini_with_retry(
+            client=client,
             model=GEMINI_MODEL,
             contents=[
                 {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical and options data for actionable, risk-aware advice."}]},
@@ -208,35 +239,40 @@ Confidence: High. Signal is Good. Strike Price: 25000. Option: CE. Reason: The O
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
         )
-
-        return response.text
+        return response_text
     
     except APIError as e:
-        return f"AI API Error: {e}. Check API Key or rate limits."
+        # This catches the final failure after the 5 retries have been exhausted.
+        final_message = f"AI API Error: Failed after 5 retries. The model may be overloaded (503), or check your quota (429). Details: {e}"
+        logger.error(final_message)
+        return final_message
+    
     except Exception as e:
+        logger.error(f"❌ Unexpected non-API error in AI suggestion: {e}")
         return f"Unexpected AI error: {e}"
+
 
 # ---------------------------------------------------------
 ## 🏃 MAIN EXECUTION LOOP
 # ---------------------------------------------------------
 state = load_state()
+logger.info("Starting Main Trading Bot Loop.")
 
 while True:
     try:
         if not is_market_time():
-            print("Market closed. Sleeping...")
+            logger.info("Market closed. Sleeping...")
             time.sleep(SLEEP_SECONDS)
             continue
 
         price = get_price()
         if price is None:
-            print("No price available, skipping iteration.")
+            logger.warning("No price available, skipping iteration.")
             time.sleep(SLEEP_SECONDS)
             continue
 
         # 1. Update Price History
         state["prices"].append(price)
-        # Keep only the last 50 prices for SMA calculation
         if len(state["prices"]) > 50:
             state["prices"] = state["prices"][-50:]
 
@@ -244,31 +280,34 @@ while True:
         sma9 = calc_sma(state["prices"], 9)
         sma21 = calc_sma(state["prices"], 21)
 
-        print(f"SMA9: {sma9} | SMA21: {sma21}")
+        if sma9 is None or sma21 is None:
+            logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
+            save_state(state)
+            time.sleep(SLEEP_SECONDS)
+            continue
+
+        logger.info(f"Current Price: {price:.2f} | SMA9: {sma9:.2f} | SMA21: {sma21:.2f}")
 
         signal = None
+        current_trend = "buy" if sma9 > sma21 else "sell" if sma9 < sma21 else "neutral"
 
-        # 3. Check for SMA Crossover Signal
-        if sma9 is not None and sma21 is not None:
-            # BUY signal: SMA9 crosses ABOVE SMA21
-            if sma9 > sma21 and state["last_signal"] != "buy":
-                signal = "BUY"
-                state["last_signal"] = "buy"
+        # 3. Check for SMA Crossover Signal (Signal persistence logic)
+        if current_trend == "buy" and state["last_signal"] != "buy":
+            signal = "BUY"
+            state["last_signal"] = "buy"
 
-            # SELL signal: SMA9 crosses BELOW SMA21
-            elif sma9 < sma21 and state["last_signal"] != "sell":
-                signal = "SELL"
-                state["last_signal"] = "sell"
+        elif current_trend == "sell" and state["last_signal"] != "sell":
+            signal = "SELL"
+            state["last_signal"] = "sell"
 
         # 4. If Signal Generated, Get AI Analysis and Notify
         if signal:
-            send_telegram(f"*🚨 Signal Detected: {signal}* (Price: {price:.2f})")
+            logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
+            send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
 
-            # Fetch and filter Options Chain data
             option_chain_result = get_nifty_strikes_for_expiry()
             
             if option_chain_result and option_chain_result['records']:
-                # CRITICAL FIX: Pass the 'records' list and the SMA values
                 ai_result = get_ai_trade_suggestion(
                     option_chain_data=option_chain_result['records'], 
                     price=price, 
@@ -276,16 +315,19 @@ while True:
                     sma21=sma21, 
                     signal_type=signal
                 )
+                ai_log_message = ai_result.strip().replace('\n', ' | ')
+                logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
                 send_telegram("*🤖 AI Analysis:*\n" + ai_result)
             else:
+                logger.warning(f"⚠️ Failed to fetch valid Options Chain for {signal} signal. Skipping AI analysis.")
                 send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
 
         # 5. Save State
         save_state(state)
 
     except Exception as e:
-        print(f"🔥 UNHANDLED ERROR IN MAIN LOOP: {e}")
-        send_telegram(f"*FATAL ERROR in Trading Bot:*\n{e}")
+        logger.exception(f"🔥 UNHANDLED ERROR IN MAIN LOOP: {e}")
+        send_telegram(f"*🔥 FATAL ERROR in Trading Bot:*\n`{e}`")
 
     # Sleep until the next iteration
     time.sleep(SLEEP_SECONDS)
