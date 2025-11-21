@@ -38,10 +38,11 @@ except ValueError:
 
 # Gemini API is used for AI Analysis
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# Sticking with Flash for speed unless stability issues persist
 GEMINI_MODEL = "gemini-2.5-flash" 
 
 STATE_FILE = "state.json"
+MARKET_CLOSE_HOUR_UTC = 10 # 3:30 PM IST is 10:00 AM UTC
+MARKET_CLOSE_MINUTE_UTC = 0
 
 try:
     # Initialize the client globally
@@ -52,8 +53,9 @@ except Exception as e:
     exit(1)
 
 # ---------------------------------------------------------
-## 💬 TELEGRAM & STATE UTILITIES
+## 💬 TELEGRAM & STATE UTILITIES (Functions remain the same)
 # ---------------------------------------------------------
+
 def send_telegram(msg: str):
     """Sends a message to the configured Telegram chat."""
     if not BOT_TOKEN or not CHAT_ID:
@@ -90,15 +92,17 @@ def load_state() -> Dict[str, Any]:
     """Loads price history and last signal from state file."""
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
-        return {"last_signal": None, "prices": []}
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
+            # Ensure new keys are present even if file is old
+            state.setdefault("last_state_clear_date", None)
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
     except Exception as e:
         logger.error(f"❌ Error loading state file, resetting state: {e}")
-        return {"last_signal": None, "prices": []}
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
 
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
@@ -116,18 +120,54 @@ def calc_sma(values: List[float], period: int) -> Optional[float]:
     return sum(values[-period:]) / period
 
 def is_market_time() -> bool:
-    """Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST)."""
+    """
+    Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST).
+    9:15 AM IST = 3:45 AM UTC
+    3:30 PM IST = 10:00 AM UTC
+    """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     weekday = now_utc.weekday()
-    if weekday >= 5:
+    if weekday >= 5: # Saturday or Sunday
         return False
+        
+    # 9:15 AM IST is 03:45 UTC
     market_open_utc = datetime.time(3, 45) 
-    market_close_utc = datetime.time(10, 0)
+    # 3:30 PM IST is 10:00 UTC
+    market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
+    
     return market_open_utc <= now_utc.time() <= market_close_utc
+    
+def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Checks if the market is closed and if the state file needs to be cleared for a new day.
+    This ensures we start every trading day with a fresh state (SMA and last_signal).
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    market_close_time_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
+    today_date_str = now_utc.date().isoformat()
+    
+    # 1. Check if it's past market close
+    if now_utc.time() > market_close_time_utc and today_date_str != state.get("last_state_clear_date"):
+        logger.critical(f"📊 Market is closed. Clearing state file for a fresh start tomorrow.")
+        
+        # Clear the STATE_FILE
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+            logger.info(f"✅ State file '{STATE_FILE}' deleted.")
+        
+        # Return a new, clean state and update the last clear date
+        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str}
+        save_state(new_state)
+        return new_state
+        
+    return state
+    
+# ... (get_nifty_strikes_for_expiry and prepare_gemini_prompt remain the same) ...
 
 def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
     """Fetches NIFTY options data and filters strikes around ATM."""
     try:
+        # NSE data fetching logic... (unchanged)
         data = nse_optionchain_scrapper("NIFTY")
         spot_price = data['records']['underlyingValue']
         option_data = data['records']['data']
@@ -164,33 +204,23 @@ def prepare_gemini_prompt(strike_data: List[Dict[str, Any]]) -> str:
 # ---------------------------------------------------------
 ## 🤖 AI ANALYSIS (GEMINI) - WITH TENACITY BACKOFF
 # ---------------------------------------------------------
+# ... (_call_gemini_with_retry remains the same)
 
-# Configure the Exponential Backoff Strategy
 @retry(
-    # Use exponential backoff (2s, 4s, 8s, 16s, etc. up to max 60s)
     wait=wait_exponential(multiplier=1, min=2, max=60), 
-    # Give up after 5 total attempts
     stop=stop_after_attempt(5),
-    # Only retry if the exception type is APIError (which includes 503)
     retry=retry_if_exception_type(APIError)
 )
 def _call_gemini_with_retry(client, model, contents, config):
     """
     Internal function to call the Gemini API, wrapped with the tenacity retry logic.
-    If it fails with a 503, tenacity will catch the APIError and retry.
     """
-    
-    # Log the retry attempt (tenacity handles the logging internally but this confirms the call)
     logger.debug("Executing Gemini API call...")
-    
     response = client.models.generate_content(
         model=model,
         contents=contents,
         config=config
     )
-    
-    # Check for immediate feedback if the API call succeeded but had issues
-    # Note: For 503, the client usually raises an APIError immediately.
     logger.debug("Gemini call completed successfully.")
     return response.text
 
@@ -198,13 +228,14 @@ def _call_gemini_with_retry(client, model, contents, config):
 def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API, 
-    managing retries for transient errors.
+    managing retries for transient errors and requesting TP/SL targets.
     """
     if not client:
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
+    # --- UPDATED PROMPT: Added Take Profit (TP) and Stop Loss (SL) requirements ---
     user_prompt = f"""
 Input:
 Signal: {signal_type}
@@ -215,17 +246,18 @@ Option Chain Data (Filtered JSON):
 {option_chain_str}
 
 Your task:
-- Analyze the SMA signal (trend confirmation) and the Options Chain (support/resistance/sentiment).
-- Determine a **Confidence Level** (Low, Medium, or High) for the overall trading decision based on whether the Options Chain confirms or contradicts the SMA signal.
-- Decide whether the SMA cross signal is **Good** (confirmed by options data) or **Bad** (contradicted by options data).
-- Suggest the best **Strike Price** for the trade.
-- Suggest whether a **CE** (Call Option) or **PE** (Put Option) should be taken.
-- Give a **clear, concise reason** in simple, layman words, specifically mentioning key OI levels.
+- Analyze the SMA signal and the Options Chain (support/resistance/sentiment).
+- Determine a **Confidence Level** (Low, Medium, or High).
+- Decide whether the SMA cross signal is **Good** (confirmed) or **Bad** (contradicted).
+- Suggest the best **Strike Price** and **Option** (CE/PE).
+- Based on the Options Chain's **Open Interest (OI)** and **Change in OI (Chg in OI)**, identify the **nearest strong resistance/support** level that should serve as a **Take Profit (TP) Target** (NIFTY price level).
+- Based on the Options Chain's OI/Chg in OI, identify the **nearest strong support/resistance** level on the opposite side that should serve as a **Stop Loss (SL) Target** (NIFTY price level).
+- Give a **clear, concise reason** in simple words.
 
-Return the response in **plain text** only. The response MUST start with the Confidence Level, followed by a colon and a space, then the rest of the analysis.
+Return the response in **plain text** only. The response MUST include the TP and SL levels in the specified format.
 
 Example desired format:
-Confidence: High. Signal is Good. Strike Price: 25000. Option: CE. Reason: The Options Chain shows strong PE OI building at 25000, confirming the bullish SMA cross.
+Confidence: High. Signal: Good. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: Strong PE OI at 25000 confirms the bullish SMA cross.
 """
 
     try:
@@ -240,13 +272,12 @@ Confidence: High. Signal is Good. Strike Price: 25000. Option: CE. Reason: The O
             config=genai.types.GenerateContentConfig(temperature=0.2)
         )
         return response_text
-    
+        
     except APIError as e:
-        # This catches the final failure after the 5 retries have been exhausted.
         final_message = f"AI API Error: Failed after 5 retries. The model may be overloaded (503), or check your quota (429). Details: {e}"
         logger.error(final_message)
         return final_message
-    
+        
     except Exception as e:
         logger.error(f"❌ Unexpected non-API error in AI suggestion: {e}")
         return f"Unexpected AI error: {e}"
@@ -260,8 +291,11 @@ logger.info("Starting Main Trading Bot Loop.")
 
 while True:
     try:
+        # Check and clear state if market is closed (runs once after market close)
+        state = check_and_clear_state(state)
+        
         if not is_market_time():
-            logger.info("Market closed. Sleeping...")
+            logger.info("Market closed or weekend. Sleeping...")
             time.sleep(SLEEP_SECONDS)
             continue
 
