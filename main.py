@@ -252,7 +252,7 @@ Your task:
 - Suggest the best **Strike Price** and **Option** (CE/PE).
 - Based on the Options Chain's **Open Interest (OI)** and **Change in OI (Chg in OI)**, identify the **nearest strong resistance/support** level that should serve as a **Take Profit (TP) Target** (NIFTY price level).
 - Based on the Options Chain's OI/Chg in OI, identify the **nearest strong support/resistance** level on the opposite side that should serve as a **Stop Loss (SL) Target** (NIFTY price level).
-- Give a **clear, concise reason** in simple words.
+- Give a **clear, concise reason** in simple, layman words, specifically mentioning key OI levels.
 
 Return the response in **plain text** only. The response MUST include the TP and SL levels in the specified format.
 
