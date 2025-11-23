@@ -178,7 +178,7 @@ def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
             
         expiry = expiry_dates[0] 
         atm = round(spot_price / 50) * 50
-        strikes_needed = [atm + i*50 for i in range(-3, 4)] 
+        strikes_needed = [atm + i*50 for i in range(-7, 8)] 
 
         filtered_records = [
             record for record in option_data 
