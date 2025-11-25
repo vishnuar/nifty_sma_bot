@@ -237,6 +237,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     # --- UPDATED PROMPT: Added Take Profit (TP) and Stop Loss (SL) requirements ---
     user_prompt = f"""
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data to generate a single, actionable, risk-managed trading recommendation.**
 Input:
 Signal: {signal_type}
 Spot Price: {price}
@@ -247,7 +248,7 @@ Option Chain Data (Filtered JSON):
 
 Your task:
 - Analyze the SMA signal and the Options Chain (support/resistance/sentiment).
-- Determine a **Confidence Level** (Low, Medium, or High).
+- Determine a **Confidence Level** (Very low, Low, Medium, or High,Very High).
 - Decide whether the SMA cross signal is **Good** (confirmed) or **Bad** (contradicted).
 - Suggest the best **Strike Price** and **Option** (CE/PE).
 - Based on the Options Chain's **Open Interest (OI)** and **Change in OI (Chg in OI)**, identify the **nearest strong resistance/support** level that should serve as a **Take Profit (TP) Target** (NIFTY price level).
