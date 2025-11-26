@@ -321,7 +321,7 @@ Option Chain Data (Filtered JSON):
 
 --- REQUIRED OUTPUT FORMAT ---
 
-**Output MUST be a single, continuous line of plain text.**
+**Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
 **The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
 
