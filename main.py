@@ -92,17 +92,20 @@ def load_state() -> Dict[str, Any]:
     """Loads price history and last signal from state file."""
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
+        # Added keys for Time-Based Exit logic
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None}
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
             # Ensure new keys are present even if file is old
             state.setdefault("last_state_clear_date", None)
+            state.setdefault("signal_iterations", 0)
+            state.setdefault("last_signal_price", None)
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
     except Exception as e:
         logger.error(f"❌ Error loading state file, resetting state: {e}")
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None}
 
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
@@ -122,8 +125,6 @@ def calc_sma(values: List[float], period: int) -> Optional[float]:
 def is_market_time() -> bool:
     """
     Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST).
-    9:15 AM IST = 3:45 AM UTC
-    3:30 PM IST = 10:00 AM UTC
     """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     weekday = now_utc.weekday()
@@ -140,7 +141,6 @@ def is_market_time() -> bool:
 def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Checks if the market is closed and if the state file needs to be cleared for a new day.
-    This ensures we start every trading day with a fresh state (SMA and last_signal).
     """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     market_close_time_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
@@ -155,8 +155,8 @@ def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
             os.remove(STATE_FILE)
             logger.info(f"✅ State file '{STATE_FILE}' deleted.")
         
-        # Return a new, clean state and update the last clear date
-        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str}
+        # New clean state 
+        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str, "signal_iterations": 0, "last_signal_price": None}
         save_state(new_state)
         return new_state
         
@@ -165,7 +165,7 @@ def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
 def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
     if not option_data:
-        return {"max_pain": "N/A", "pcr": "N/A"}
+        return {"max_pain": "N/A", "pcr": 0.0}
 
     # 1. Calculate PCR
     total_put_oi = 0
@@ -178,11 +178,10 @@ def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, A
     
     pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
 
-    # 2. Calculate Max Pain
+    # 2. Calculate Max Pain (Logic confirmed as mathematically correct)
     max_pain = "N/A"
     min_loss = float('inf')
     
-    # We use all strike prices from the input data, not just the filtered ones
     strike_prices = sorted(list(set(r['strikePrice'] for r in option_data)))
     
     for strike in strike_prices:
@@ -220,13 +219,11 @@ def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
         atm = round(spot_price / 50) * 50
         strikes_needed = [atm + i*50 for i in range(-7, 8)] 
 
-        # Filter records for AI analysis (around ATM)
         filtered_records = [
             record for record in full_option_data 
             if record['strikePrice'] in strikes_needed and record['expiryDate'] == expiry
         ]
         
-        # Calculate Max Pain and PCR using the FULL option chain data
         metrics = calculate_max_pain_and_pcr(full_option_data)
         
         logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr']:.2f}")
@@ -270,7 +267,7 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, signal_iterations: int, last_signal_price: float) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API.
     """
@@ -279,12 +276,11 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
     
-    # Extract the expiry date safely from the filtered records list
     expiry_date = option_chain_data[0].get('expiryDate', 'N/A') if option_chain_data else 'N/A'
     
-    # --- REVISED PROMPT WITH PCR, MAX PAIN, and NEW WRITING LOGIC ---
+    # --- FINAL PROMPT WITH ALL CONSTRAINTS ---
     user_prompt = f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your goal is to combine technical (SMA), PCR, Max Pain (Bias), and New Writing (Conviction) to generate a single, actionable, risk-managed trading recommendation.**
 
 Input Data:
 Signal: {signal_type}
@@ -295,38 +291,44 @@ Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat
 Option Expiry Date: {expiry_date}
 Put-Call Ratio (PCR): {pcr:.2f}
 Max Pain Level: {max_pain}
+Iterations Since Signal: {signal_iterations}
+Last Signal Price: {last_signal_price:.2f}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
 --- GUIDELINES AND CONSTRAINTS ---
 
 1.  **Definitions & Data Constraint:**
-    * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-    * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
+    * **Resistance/Support Targets (TP/SL):** MUST be based only on strikes with the highest **Open Interest (OI)** or **Change in OI (Chg in OI)**.
     * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
 2.  **Trade Parameters:**
-    * **Take Profit (TP) Target** MUST be set at the nearest strong **Resistance (CE OI)** level.
-    * **Stop Loss (SL) Target** MUST be set at the nearest strong **Support (PE OI for BUY) or Resistance (CE OI for SELL)** level on the opposite side of the target.
+    * **Take Profit (TP) Target** MUST be set at the nearest strong **New Writing Resistance (CE OI)** or **Support (PE OI)** level that aligns with the signal.
+    * **Stop Loss (SL) Target** MUST be set at the nearest strong **Conflicting New Writing** level.
+    * **MAX PAIN MUST NOT BE USED TO SET TP OR SL. It is for bias check only.**
 
-3.  **MARKET STRUCTURE (PCR/MAX PAIN) ANALYSIS:**
-    * **PCR Interpretation:** PCR < 0.7 suggests overbought/extreme bearishness (resistance likely). PCR > 1.3 suggests oversold/extreme bullishness (support likely). Use Max Pain as a potential magnet/pivot point.
-    * **New Writing:** Identify **new writing** by looking for strikes where **Change in OI (Chg in OI)** is significantly high, indicating active bearish (CE writing) or bullish (PE writing) fresh activity. This fresh writing confirms the conviction of the market participants.
+3.  **MARKET STRUCTURE (PCR/NEW WRITING) ANALYSIS:**
+    * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing (high Chg in OI) over all other OI metrics.
+    * **PCR/Bias:** Use PCR (0.7-1.3 neutral zone) and Max Pain as secondary directional confirmation only.
 
 4.  **VOLATILITY AND EXPIRY DAY RULE:**
-    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
-
-5.  **Confidence & R/R Constraint (R/R > 1.5):**
     * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
+    * If today's date matches the Option Expiry Date ({expiry_date}), automatically apply a **one-tier downgrade** to the initial Confidence Level.
+
+5.  **TIME-BASED EXIT (THETA RISK):**
+    * Analyze the "Iterations Since Signal" (current time passed). If the current value is **greater than 10** (10 minutes) AND the price has not moved more than 30% of the distance toward the Take Profit (TP) target (calculated from Last Signal Price), the trade is deemed 'Theta Risk.'
+    * If 'Theta Risk' is identified, the final confidence MUST be downgraded to **'Low,'** and the Reason must explicitly state this risk, suggesting an immediate exit to preserve capital.
+
+6.  **R/R Constraint (R/R > 1.5):**
     * If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
 
 --- REQUIRED OUTPUT FORMAT ---
 
-**Output MUST be a single, continuous line of plain text and layman words**
+**Output MUST be a single, continuous line of plain text.**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, the NEW WRITING conviction, and the PCR/Max Pain bias.**
 
 Example desired format:
-Confidence: High. Signal: Good. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
+Confidence: Low. Signal: Buy. Strike Price: 26000. Option: CE. Take Profit (TP): 26100. Stop Loss (SL): 25950. Reason: Trade is slow and inefficient after 15 minutes (Theta Risk), suggesting immediate exit.
 """
 
     try:
@@ -336,7 +338,7 @@ Confidence: High. Signal: Good. Strike Price: 25000. Option: CE. Take Profit (TP
             model=GEMINI_MODEL,
             contents=[
                 {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical, PCR, Max Pain, and options data for actionable, risk-aware advice."}]},
-                {"role": "user", "parts": [{"text": user_prompt}]}
+                {"role": user, "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
         )
@@ -398,35 +400,60 @@ while True:
         if current_trend == "buy" and state["last_signal"] != "buy":
             signal = "BUY"
             state["last_signal"] = "buy"
+            state["signal_iterations"] = 0 # Reset counter on new signal
+            state["last_signal_price"] = price
 
         elif current_trend == "sell" and state["last_signal"] != "sell":
             signal = "SELL"
             state["last_signal"] = "sell"
+            state["signal_iterations"] = 0 # Reset counter on new signal
+            state["last_signal_price"] = price
 
         # 4. If Signal Generated, Get AI Analysis and Notify
-        if signal:
-            logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
-            send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
+        if signal or state["last_signal"]: # Run AI analysis on every iteration if a signal is active
+            
+            # --- ITERATION COUNTER MANAGEMENT ---
+            if state["last_signal"] is not None:
+                state["signal_iterations"] += 1
+            # --- END ITERATION COUNTER MANAGEMENT ---
 
             option_chain_result = get_nifty_strikes_for_expiry()
             
             if option_chain_result and option_chain_result['records']:
-                # Call AI with new PCR and Max Pain data
                 ai_result = get_ai_trade_suggestion(
                     option_chain_data=option_chain_result['records'], 
                     price=price, 
                     sma9=sma9, 
                     sma21=sma21, 
-                    signal_type=signal,
+                    signal_type=state["last_signal"] or "NEUTRAL", 
                     pcr=option_chain_result['pcr'],
-                    max_pain=str(option_chain_result['max_pain']) # Pass as string for safety
+                    max_pain=str(option_chain_result['max_pain']),
+                    signal_iterations=state["signal_iterations"], 
+                    last_signal_price=state["last_signal_price"] or price
                 )
-                ai_log_message = ai_result.strip().replace('\n', ' | ')
-                logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
-                send_telegram("*🤖 AI Analysis:*\n" + ai_result)
+                
+                # Only send a telegram alert on a NEW signal OR if the AI suggests an EXIT (Low Confidence)
+                ai_dict = {}
+                try:
+                    # Attempt to parse the AI output to check Confidence
+                    parts = ai_result.split('. ')
+                    for part in parts:
+                        if ':' in part:
+                            key, value = part.split(':', 1)
+                            ai_dict[key.strip()] = value.strip().replace('.', '')
+                except:
+                    pass # Ignore parsing errors
+
+                log_message = ai_result.strip().replace('\n', ' | ')
+                logger.critical(f"🤖 AI RECOMMENDS: {log_message}")
+
+                # Send Telegram alert if it's a new signal OR if the AI forces a 'Low' confidence exit
+                if signal or (ai_dict.get('Confidence') == 'Low' and state["signal_iterations"] > 1):
+                    send_telegram("*🤖 AI Analysis:*\n" + ai_result)
             else:
-                logger.warning(f"⚠️ Failed to fetch valid Options Chain for {signal} signal. Skipping AI analysis.")
-                send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
+                logger.warning(f"⚠️ Failed to fetch valid Options Chain. Skipping AI analysis.")
+                if signal:
+                     send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
 
         # 5. Save State
         save_state(state)
