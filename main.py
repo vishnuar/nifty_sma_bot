@@ -204,7 +204,7 @@ def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, A
     
     return {"max_pain": max_pain, "pcr": pcr}
 
-def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]:
+def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
     """Fetches NIFTY options data, calculates Max Pain/PCR, and filters strikes around ATM."""
     try:
         data = nse_optionchain_scrapper("NIFTY")
