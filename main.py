@@ -89,11 +89,11 @@ def get_price() -> Optional[float]:
     return p
 
 def load_state() -> Dict[str, Any]:
-    """Loads price history and last signal from state file."""
+    """Loads price history, signal data, and feedback status from state file."""
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
-        # Added keys for Time-Based Exit logic
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None}
+        # Added keys for Time-Based Exit and Feedback logic
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None, "last_trade_feedback": "NONE"}
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
@@ -101,11 +101,12 @@ def load_state() -> Dict[str, Any]:
             state.setdefault("last_state_clear_date", None)
             state.setdefault("signal_iterations", 0)
             state.setdefault("last_signal_price", None)
+            state.setdefault("last_trade_feedback", "NONE") # NEW KEY FOR FEEDBACK
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
     except Exception as e:
         logger.error(f"❌ Error loading state file, resetting state: {e}")
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None}
+        return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None, "last_trade_feedback": "NONE"}
 
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
@@ -156,7 +157,7 @@ def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"✅ State file '{STATE_FILE}' deleted.")
         
         # New clean state 
-        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str, "signal_iterations": 0, "last_signal_price": None}
+        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str, "signal_iterations": 0, "last_signal_price": None, "last_trade_feedback": "NONE"}
         save_state(new_state)
         return new_state
         
@@ -267,7 +268,7 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, signal_iterations: int, last_signal_price: float) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, signal_iterations: int, last_signal_price: float, last_trade_feedback: str) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API.
     """
@@ -278,7 +279,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     
     expiry_date = option_chain_data[0].get('expiryDate', 'N/A') if option_chain_data else 'N/A'
     
-    # --- FINAL PROMPT WITH ALL CONSTRAINTS ---
+    # --- FINAL PROMPT WITH ALL CONSTRAINTS AND FEEDBACK ---
     user_prompt = f"""
 **SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your goal is to combine technical (SMA), PCR, Max Pain (Bias), and New Writing (Conviction) to generate a single, actionable, risk-managed trading recommendation.**
 
@@ -293,6 +294,7 @@ Put-Call Ratio (PCR): {pcr:.2f}
 Max Pain Level: {max_pain}
 Iterations Since Signal: {signal_iterations}
 Last Signal Price: {last_signal_price:.2f}
+Last Trade Feedback: {last_trade_feedback}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
@@ -318,7 +320,11 @@ Option Chain Data (Filtered JSON):
     * Analyze the "Iterations Since Signal" (current time passed). If the current value is **greater than 10** (10 minutes) AND the price has not moved more than 30% of the distance toward the Take Profit (TP) target (calculated from Last Signal Price), the trade is deemed 'Theta Risk.'
     * If 'Theta Risk' is identified, the final confidence MUST be downgraded to **'Low,'** and the Reason must explicitly state this risk, suggesting an immediate exit to preserve capital.
 
-6.  **R/R Constraint (R/R > 1.5):**
+6.  **FEEDBACK REINFORCEMENT:**
+    * If **Last Trade Feedback** was 'NEGATIVE', automatically downgrade the initial Confidence of the current signal by one tier (reflecting recent adverse conditions/strategy failure).
+    * If **Last Trade Feedback** was 'POSITIVE', automatically upgrade the initial Confidence of the current signal by one tier (reflecting recent success/favorable conditions).
+
+7.  **R/R Constraint (R/R > 1.5):**
     * If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
 
 --- REQUIRED OUTPUT FORMAT ---
@@ -328,7 +334,7 @@ Option Chain Data (Filtered JSON):
 **The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, the NEW WRITING conviction, and the PCR/Max Pain bias.**
 
 Example desired format:
-Confidence: Low. Signal: Buy. Strike Price: 26000. Option: CE. Take Profit (TP): 26100. Stop Loss (SL): 25950. Reason: Trade is slow and inefficient after 15 minutes (Theta Risk), suggesting immediate exit.
+Confidence: Medium. Signal: Buy. Strike Price: 26000. Option: CE. Take Profit (TP): 26100. Stop Loss (SL): 25950. Reason: SMA confirms BUY, but confidence downgraded due to negative feedback from last trade.
 """
 
     try:
@@ -398,17 +404,23 @@ while True:
 
         # 3. Check for SMA Crossover Signal (Signal persistence logic)
         if current_trend == "buy" and state["last_signal"] != "buy":
+            # Signal flip detected: This marks the end of the previous trade
+            # The AI prompt consumes last_trade_feedback *before* it is cleared.
+            
             signal = "BUY"
             state["last_signal"] = "buy"
             state["signal_iterations"] = 0 # Reset counter on new signal
             state["last_signal_price"] = price
 
         elif current_trend == "sell" and state["last_signal"] != "sell":
+            # Signal flip detected: This marks the end of the previous trade
+            # The AI prompt consumes last_trade_feedback *before* it is cleared.
+            
             signal = "SELL"
             state["last_signal"] = "sell"
             state["signal_iterations"] = 0 # Reset counter on new signal
             state["last_signal_price"] = price
-
+        
         # 4. If Signal Generated, Get AI Analysis and Notify
         if signal or state["last_signal"]: # Run AI analysis on every iteration if a signal is active
             
@@ -416,6 +428,13 @@ while True:
             if state["last_signal"] is not None:
                 state["signal_iterations"] += 1
             # --- END ITERATION COUNTER MANAGEMENT ---
+            
+            # --- CRITICAL FIX: Send initial alert immediately if new signal ---
+            if signal:
+                 logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
+                 send_telegram(f"*🚨 MAJOR SIGNAL DETECTED: {signal}* (Price: {price:.2f})")
+            # --- END CRITICAL FIX ---
+
 
             option_chain_result = get_nifty_strikes_for_expiry()
             
@@ -429,7 +448,8 @@ while True:
                     pcr=option_chain_result['pcr'],
                     max_pain=str(option_chain_result['max_pain']),
                     signal_iterations=state["signal_iterations"], 
-                    last_signal_price=state["last_signal_price"] or price
+                    last_signal_price=state["last_signal_price"] or price,
+                    last_trade_feedback=state.get("last_trade_feedback", "NONE") # PASS FEEDBACK
                 )
                 
                 # Only send a telegram alert on a NEW signal OR if the AI suggests an EXIT (Low Confidence)
@@ -447,13 +467,28 @@ while True:
                 log_message = ai_result.strip().replace('\n', ' | ')
                 logger.critical(f"🤖 AI RECOMMENDS: {log_message}")
 
-                # Send Telegram alert if it's a new signal OR if the AI forces a 'Low' confidence exit
-                if signal or (ai_dict.get('Confidence') == 'Low' and state["signal_iterations"] > 1):
-                    send_telegram("*🤖 AI Analysis:*\n" + ai_result)
+                # Logic to trigger secondary alerts (Time-Based Exit / Confidence Warning)
+                if ai_dict.get('Confidence') == 'Low':
+                    # Check if this is a time-based exit (active trade, low confidence)
+                    if state["last_signal"] and state["signal_iterations"] > 1:
+                        send_telegram("*🛑 FORCED EXIT:* " + ai_result)
+                        # After forced exit, reset state flags
+                        state["last_signal"] = None
+                        state["signal_iterations"] = 0
+                        state["last_signal_price"] = None
+                        state["last_trade_feedback"] = "NEGATIVE" # Record exit as negative feedback
+                    
+                    # Or if it's a new signal immediately rejected (R/R violation)
+                    elif signal:
+                         send_telegram(f"*⚠️ Signal Rejected:* {ai_result}")
+                         state["last_signal"] = None # Clear signal to allow next cross check
+                         state["signal_iterations"] = 0 
+                         state["last_signal_price"] = None
+                         state["last_trade_feedback"] = "NEGATIVE" # Record rejection as negative feedback
+            
             else:
                 logger.warning(f"⚠️ Failed to fetch valid Options Chain. Skipping AI analysis.")
-                if signal:
-                     send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
+                # The initial signal alert has already been sent above.
 
         # 5. Save State
         save_state(state)
