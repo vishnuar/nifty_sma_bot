@@ -338,7 +338,7 @@ Confidence: Low. Signal: Buy. Strike Price: 26000. Option: CE. Take Profit (TP):
             model=GEMINI_MODEL,
             contents=[
                 {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical, PCR, Max Pain, and options data for actionable, risk-aware advice."}]},
-                {"role": user, "parts": [{"text": user_prompt}]}
+                {"role": "user", "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
         )
