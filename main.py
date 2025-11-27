@@ -92,7 +92,6 @@ def load_state() -> Dict[str, Any]:
     """Loads price history, signal data, and feedback status from state file."""
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
-        # Added keys for Time-Based Exit and Feedback logic
         return {"last_signal": None, "prices": [], "last_state_clear_date": None, "signal_iterations": 0, "last_signal_price": None, "last_trade_feedback": "NONE"}
     try:
         with open(STATE_FILE, "r") as f:
@@ -101,7 +100,7 @@ def load_state() -> Dict[str, Any]:
             state.setdefault("last_state_clear_date", None)
             state.setdefault("signal_iterations", 0)
             state.setdefault("last_signal_price", None)
-            state.setdefault("last_trade_feedback", "NONE") # NEW KEY FOR FEEDBACK
+            state.setdefault("last_trade_feedback", "NONE")
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
     except Exception as e:
@@ -205,7 +204,7 @@ def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, A
     
     return {"max_pain": max_pain, "pcr": pcr}
 
-def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
+def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]:
     """Fetches NIFTY options data, calculates Max Pain/PCR, and filters strikes around ATM."""
     try:
         data = nse_optionchain_scrapper("NIFTY")
@@ -403,26 +402,24 @@ while True:
         current_trend = "buy" if sma9 > sma21 else "sell" if sma9 < sma21 else "neutral"
 
         # 3. Check for SMA Crossover Signal (Signal persistence logic)
+        is_new_signal = False
+
         if current_trend == "buy" and state["last_signal"] != "buy":
-            # Signal flip detected: This marks the end of the previous trade
-            # The AI prompt consumes last_trade_feedback *before* it is cleared.
-            
+            is_new_signal = True
             signal = "BUY"
             state["last_signal"] = "buy"
             state["signal_iterations"] = 0 # Reset counter on new signal
             state["last_signal_price"] = price
 
         elif current_trend == "sell" and state["last_signal"] != "sell":
-            # Signal flip detected: This marks the end of the previous trade
-            # The AI prompt consumes last_trade_feedback *before* it is cleared.
-            
+            is_new_signal = True
             signal = "SELL"
             state["last_signal"] = "sell"
             state["signal_iterations"] = 0 # Reset counter on new signal
             state["last_signal_price"] = price
         
-        # 4. If Signal Generated, Get AI Analysis and Notify
-        if signal or state["last_signal"]: # Run AI analysis on every iteration if a signal is active
+        # 4. If Signal Generated or Active Trade, Run AI Analysis
+        if is_new_signal or state["last_signal"]:
             
             # --- ITERATION COUNTER MANAGEMENT ---
             if state["last_signal"] is not None:
@@ -430,7 +427,7 @@ while True:
             # --- END ITERATION COUNTER MANAGEMENT ---
             
             # --- CRITICAL FIX: Send initial alert immediately if new signal ---
-            if signal:
+            if is_new_signal:
                  logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
                  send_telegram(f"*🚨 MAJOR SIGNAL DETECTED: {signal}* (Price: {price:.2f})")
             # --- END CRITICAL FIX ---
@@ -449,7 +446,7 @@ while True:
                     max_pain=str(option_chain_result['max_pain']),
                     signal_iterations=state["signal_iterations"], 
                     last_signal_price=state["last_signal_price"] or price,
-                    last_trade_feedback=state.get("last_trade_feedback", "NONE") # PASS FEEDBACK
+                    last_trade_feedback=state.get("last_trade_feedback", "NONE")
                 )
                 
                 # Only send a telegram alert on a NEW signal OR if the AI suggests an EXIT (Low Confidence)
@@ -467,24 +464,34 @@ while True:
                 log_message = ai_result.strip().replace('\n', ' | ')
                 logger.critical(f"🤖 AI RECOMMENDS: {log_message}")
 
-                # Logic to trigger secondary alerts (Time-Based Exit / Confidence Warning)
-                if ai_dict.get('Confidence') == 'Low':
-                    # Check if this is a time-based exit (active trade, low confidence)
+                current_confidence = ai_dict.get('Confidence')
+
+                # Logic for Secondary Alerts and State Reset
+                if current_confidence == 'Low' or current_confidence == 'LOWEST':
+                    
+                    # 1. Active Trade EXIT (Time-Based or R/R Degradation)
                     if state["last_signal"] and state["signal_iterations"] > 1:
+                        # Trade is active and AI is forcing a Theta/R/R exit
                         send_telegram("*🛑 FORCED EXIT:* " + ai_result)
-                        # After forced exit, reset state flags
+                        
+                        # Reset state after forced exit
                         state["last_signal"] = None
                         state["signal_iterations"] = 0
                         state["last_signal_price"] = None
                         state["last_trade_feedback"] = "NEGATIVE" # Record exit as negative feedback
-                    
-                    # Or if it's a new signal immediately rejected (R/R violation)
-                    elif signal:
+
+                    # 2. New Signal REJECTED (R/R or Structural violation)
+                    elif is_new_signal:
                          send_telegram(f"*⚠️ Signal Rejected:* {ai_result}")
-                         state["last_signal"] = None # Clear signal to allow next cross check
+                         # CRITICAL FIX: DO NOT reset last_signal, only reset R/R counters and record failure.
+                         # This prevents the alert loop until the SMA flips direction.
                          state["signal_iterations"] = 0 
                          state["last_signal_price"] = None
                          state["last_trade_feedback"] = "NEGATIVE" # Record rejection as negative feedback
+                    
+                # If a signal is active and confidence is MEDIUM or HIGH, send the AI Analysis update
+                elif state["last_signal"] and not is_new_signal:
+                    send_telegram("*🤖 AI Analysis:* " + ai_result)
             
             else:
                 logger.warning(f"⚠️ Failed to fetch valid Options Chain. Skipping AI analysis.")
