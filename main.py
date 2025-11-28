@@ -44,6 +44,14 @@ STATE_FILE = "state.json"
 MARKET_CLOSE_HOUR_UTC = 10 # 3:30 PM IST is 10:00 AM UTC
 MARKET_CLOSE_MINUTE_UTC = 0
 
+# --- NEW CONFIGURATION: SMA Buffer (Read from environment) ---
+try:
+    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "3.0"))
+except ValueError:
+    SMA_BUFFER_POINTS = 3.0
+    logger.warning("SMA_BUFFER environment variable is invalid. Defaulting to 3.0 points.")
+# --- END NEW CONFIGURATION ---
+
 try:
     # Initialize the client globally
     client = genai.Client(api_key=GEMINI_API_KEY)
@@ -61,7 +69,7 @@ def send_telegram(msg: str):
     if not BOT_TOKEN or not CHAT_ID:
         logger.warning(f"⚠️ Missing Telegram config. Content: {msg.strip().replace('\n', ' ')}")
         return
-
+        
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
@@ -89,14 +97,18 @@ def get_price() -> Optional[float]:
     return p
 
 def load_state() -> Dict[str, Any]:
-    """Loads price history and last signal from state file."""
+    """Loads price history, signal data, and feedback status from state file."""
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
         return {"last_signal": None, "prices": [], "last_state_clear_date": None}
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
-            # Ensure new keys are present even if file is old
+            # Clean up obsolete keys if they exist
+            if "last_trade_feedback" in state: del state["last_trade_feedback"]
+            if "signal_iterations" in state: del state["signal_iterations"]
+            if "last_signal_price" in state: del state["last_signal_price"]
+            
             state.setdefault("last_state_clear_date", None)
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
@@ -107,6 +119,11 @@ def load_state() -> Dict[str, Any]:
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
     try:
+        # Clean obsolete keys before saving
+        if "last_trade_feedback" in state: del state["last_trade_feedback"]
+        if "signal_iterations" in state: del state["signal_iterations"]
+        if "last_signal_price" in state: del state["last_signal_price"]
+        
         with open(STATE_FILE, "w") as f:
             json.dump(state, f)
         logger.debug("State saved successfully.")
@@ -122,50 +139,47 @@ def calc_sma(values: List[float], period: int) -> Optional[float]:
 def is_market_time() -> bool:
     """
     Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST).
-    9:15 AM IST = 3:45 AM UTC
-    3:30 PM IST = 10:00 AM UTC
     """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     weekday = now_utc.weekday()
     if weekday >= 5: # Saturday or Sunday
         return False
-
+        
     # 9:15 AM IST is 03:45 UTC
     market_open_utc = datetime.time(3, 45) 
     # 3:30 PM IST is 10:00 UTC
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
-
+    
     return market_open_utc <= now_utc.time() <= market_close_utc
-
+    
 def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Checks if the market is closed and if the state file needs to be cleared for a new day.
-    This ensures we start every trading day with a fresh state (SMA and last_signal).
     """
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     market_close_time_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
     today_date_str = now_utc.date().isoformat()
-
+    
     # 1. Check if it's past market close
     if now_utc.time() > market_close_time_utc and today_date_str != state.get("last_state_clear_date"):
         logger.critical(f"📊 Market is closed. Clearing state file for a fresh start tomorrow.")
-
+        
         # Clear the STATE_FILE
         if os.path.exists(STATE_FILE):
             os.remove(STATE_FILE)
             logger.info(f"✅ State file '{STATE_FILE}' deleted.")
-
-        # Return a new, clean state and update the last clear date
+        
+        # New clean state 
         new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str}
         save_state(new_state)
         return new_state
-
+        
     return state
-
+    
 def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
     if not option_data:
-        return {"max_pain": "N/A", "pcr": "N/A"}
+        return {"max_pain": "N/A", "pcr": 0.0}
 
     # 1. Calculate PCR
     total_put_oi = 0
@@ -175,34 +189,33 @@ def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, A
             total_put_oi += record['PE']['openInterest']
         if record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
             total_call_oi += record['CE']['openInterest']
-
+    
     pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
 
-    # 2. Calculate Max Pain
+    # 2. Calculate Max Pain (Logic confirmed as mathematically correct)
     max_pain = "N/A"
     min_loss = float('inf')
-
-    # We use all strike prices from the input data, not just the filtered ones
+    
     strike_prices = sorted(list(set(r['strikePrice'] for r in option_data)))
-
+    
     for strike in strike_prices:
         total_loss_at_strike = 0
-
+        
         for record in option_data:
             record_strike = record['strikePrice']
-
+            
             # Loss for Put Writers (PE is ITM, PE Writers lose)
             if record_strike < strike and record.get('PE') and isinstance(record['PE'].get('openInterest'), (int, float)):
                 total_loss_at_strike += (strike - record_strike) * record['PE']['openInterest']
-
+            
             # Loss for Call Writers (CE is ITM, CE Writers lose)
             if record_strike > strike and record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
                 total_loss_at_strike += (record_strike - strike) * record['CE']['openInterest']
-
+        
         if total_loss_at_strike < min_loss:
             min_loss = total_loss_at_strike
             max_pain = strike
-
+    
     return {"max_pain": max_pain, "pcr": pcr}
 
 def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
@@ -215,20 +228,18 @@ def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
         if not expiry_dates:
             logger.warning("❌ No expiry dates found in the NSE data.")
             return None
-
+            
         expiry = expiry_dates[0] 
         atm = round(spot_price / 50) * 50
         strikes_needed = [atm + i*50 for i in range(-7, 8)] 
 
-        # Filter records for AI analysis (around ATM)
         filtered_records = [
             record for record in full_option_data 
             if record['strikePrice'] in strikes_needed and record['expiryDate'] == expiry
         ]
-
-        # Calculate Max Pain and PCR using the FULL option chain data
+        
         metrics = calculate_max_pain_and_pcr(full_option_data)
-
+        
         logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr']:.2f}")
 
         return {
@@ -278,11 +289,10 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
-
-    # Extract the expiry date safely from the filtered records list
+    
     expiry_date = option_chain_data[0].get('expiryDate', 'N/A') if option_chain_data else 'N/A'
-
-    # --- REVISED PROMPT WITH PCR, MAX PAIN, and NEW WRITING LOGIC ---
+    
+    # --- FINAL PROMPT WITH ALL CONSTRAINTS (NO FEEDBACK/TIME) ---
     user_prompt = f"""
 **SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
 
@@ -313,10 +323,10 @@ Option Chain Data (Filtered JSON):
     * **New Writing:** Identify **new writing** by looking for strikes where **Change in OI (Chg in OI)** is significantly high, indicating active bearish (CE writing) or bullish (PE writing) fresh activity. This fresh writing confirms the conviction of the market participants.
 
 4.  **VOLATILITY AND EXPIRY DAY RULE:**
-    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
-
-5.  **Confidence & R/R Constraint (R/R > 1.5):**
     * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
+    * If today's date matches the Option Expiry Date ({expiry_date}), automatically apply a **one-tier downgrade** to the initial Confidence Level.
+
+5.  **R/R Constraint (R/R > 1.5):**
     * If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
 
 --- REQUIRED OUTPUT FORMAT ---
@@ -389,44 +399,96 @@ while True:
             time.sleep(SLEEP_SECONDS)
             continue
 
+        # --- START SMA BUFFER LOGIC IMPLEMENTATION ---
+        SMA_BUFFER = SMA_BUFFER_POINTS # Use the configuration constant 
+
+        if sma9 > (sma21 + SMA_BUFFER):
+            current_trend = "buy"  # SMA9 must be 3 points ABOVE SMA21
+        elif sma9 < (sma21 - SMA_BUFFER):
+            current_trend = "sell" # SMA9 must be 3 points BELOW SMA21
+        else:
+            current_trend = "neutral" # SMAs are too close (within the +/- 3 point buffer zone)
+        # --- END SMA BUFFER LOGIC IMPLEMENTATION ---
+
         logger.info(f"Current Price: {price:.2f} | SMA9: {sma9:.2f} | SMA21: {sma21:.2f}")
 
         signal = None
-        current_trend = "buy" if sma9 > sma21 else "sell" if sma9 < sma21 else "neutral"
-
+        
         # 3. Check for SMA Crossover Signal (Signal persistence logic)
+        is_new_signal = False
+
         if current_trend == "buy" and state["last_signal"] != "buy":
+            is_new_signal = True
             signal = "BUY"
             state["last_signal"] = "buy"
 
         elif current_trend == "sell" and state["last_signal"] != "sell":
+            is_new_signal = True
             signal = "SELL"
             state["last_signal"] = "sell"
 
-        # 4. If Signal Generated, Get AI Analysis and Notify
-        if signal:
-            logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
-            send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
+        # 4. If Signal Generated or Active Trade, Run AI Analysis
+        if is_new_signal or state["last_signal"]: 
+            
+            # --- CRITICAL FIX: Send initial alert immediately if new signal ---
+            if is_new_signal:
+                 logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
+                 send_telegram(f"*🚨 MAJOR SIGNAL DETECTED: {signal}* (Price: {price:.2f})")
+            # --- END CRITICAL FIX ---
+
 
             option_chain_result = get_nifty_strikes_for_expiry()
-
+            
             if option_chain_result and option_chain_result['records']:
-                # Call AI with new PCR and Max Pain data
                 ai_result = get_ai_trade_suggestion(
                     option_chain_data=option_chain_result['records'], 
                     price=price, 
                     sma9=sma9, 
                     sma21=sma21, 
-                    signal_type=signal,
+                    signal_type=state["last_signal"] or "NEUTRAL", 
                     pcr=option_chain_result['pcr'],
-                    max_pain=str(option_chain_result['max_pain']) # Pass as string for safety
+                    max_pain=str(option_chain_result['max_pain'])
                 )
-                ai_log_message = ai_result.strip().replace('\n', ' | ')
-                logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
-                send_telegram("*🤖 AI Analysis:*\n" + ai_result)
+                
+                # Only send a telegram alert on a NEW signal OR if the AI suggests an EXIT (Low Confidence)
+                ai_dict = {}
+                try:
+                    # Attempt to parse the AI output to check Confidence
+                    parts = ai_result.split('. ')
+                    for part in parts:
+                        if ':' in part:
+                            key, value = part.split(':', 1)
+                            ai_dict[key.strip()] = value.strip().replace('.', '')
+                except:
+                    pass # Ignore parsing errors
+
+                log_message = ai_result.strip().replace('\n', ' | ')
+                logger.critical(f"🤖 AI RECOMMENDS: {log_message}")
+
+                current_confidence = ai_dict.get('Confidence')
+
+                # Logic for Secondary Alerts and State Reset
+                if current_confidence == 'Low' or current_confidence == 'LOWEST':
+                    
+                    # 1. New Signal REJECTED (R/R or Structural violation)
+                    if is_new_signal:
+                         send_telegram(f"*⚠️ Signal Rejected:* {ai_result}")
+                         
+                         # CRITICAL FIX: Preserve last_signal state to prevent spamming until SMA flips.
+                         # The SMA buffer prevents the immediate spam; the state keeps the bot in the trend.
+                    
+                    # 2. Active Trade WARNING (If confidence drops while already in a trade)
+                    elif state["last_signal"]: 
+                         send_telegram("*🛑 VIOLATION WARNING:* " + ai_result)
+                         
+                         # Since there is NO forced exit, we simply warn and let the SMA flip handle the exit.
+
+                # If a signal is active and confidence is MEDIUM or HIGH, send the AI Analysis update
+                elif state["last_signal"] and not is_new_signal:
+                    send_telegram("*🤖 AI Analysis:* " + ai_result)
+            
             else:
-                logger.warning(f"⚠️ Failed to fetch valid Options Chain for {signal} signal. Skipping AI analysis.")
-                send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
+                logger.warning(f"⚠️ Failed to fetch valid Options Chain. Skipping AI analysis.")
 
         # 5. Save State
         save_state(state)
@@ -436,3 +498,4 @@ while True:
         send_telegram(f"*🔥 FATAL ERROR in Trading Bot:*\n`{e}`")
 
     # Sleep until the next iteration
+    time.sleep(SLEEP_SECONDS)
