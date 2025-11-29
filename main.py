@@ -30,10 +30,16 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 try:
-    SLEEP_SECONDS = int(os.getenv("SLEEP_SECONDS", "60"))
+    MARKET_SLEEP_SECONDS = int(os.getenv("MARKET_SLEEP_SECONDS", "300"))
 except ValueError:
-    SLEEP_SECONDS = 60
-    logger.warning("SLEEP_SECONDS environment variable is invalid. Defaulting to 60 seconds.")
+    MARKET_SLEEP_SECONDS = 300
+    logger.warning("MARKET_SLEEP_SECONDS environment variable is invalid. Defaulting to 300 seconds.")
+
+try:
+    PRICE_FETCH_DELAY = int(os.getenv("PRICE_FETCH_DELAY", "60"))
+except ValueError:
+    PRICE_FETCH_DELAY = 60
+    logger.warning("PRICE_FETCH_DELAY environment variable is invalid. Defaulting to 60 seconds.")
 
 
 # Gemini API is used for AI Analysis
@@ -144,31 +150,6 @@ def is_market_time() -> bool:
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
 
     return market_open_utc <= now_utc.time() <= market_close_utc
-
-def check_and_clear_state(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Checks if the market is closed and if the state file needs to be cleared for a new day.
-    This ensures we start every trading day with a fresh state (SMA and last_signal).
-    """
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    market_close_time_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
-    today_date_str = now_utc.date().isoformat()
-
-    # 1. Check if it's past market close
-    if now_utc.time() > market_close_time_utc and today_date_str != state.get("last_state_clear_date"):
-        logger.critical(f"📊 Market is closed. Clearing state file for a fresh start tomorrow.")
-
-        # Clear the STATE_FILE
-        if os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
-            logger.info(f"✅ State file '{STATE_FILE}' deleted.")
-
-        # Return a new, clean state and update the last clear date
-        new_state = {"last_signal": None, "prices": [], "last_state_clear_date": today_date_str}
-        save_state(new_state)
-        return new_state
-
-    return state
 
 def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
@@ -368,18 +349,16 @@ logger.info("Starting Main Trading Bot Loop.")
 
 while True:
     try:
-        # Check and clear state if market is closed (runs once after market close)
-        state = check_and_clear_state(state)
 
         if not is_market_time():
             logger.info("Market closed or weekend. Sleeping...")
-            time.sleep(SLEEP_SECONDS)
+            time.sleep(MARKET_SLEEP_SECONDS)
             continue
 
         price = get_price()
         if price is None:
             logger.warning("No price available, skipping iteration.")
-            time.sleep(SLEEP_SECONDS)
+            time.sleep(PRICE_FETCH_DELAY)
             continue
 
         # 1. Update Price History
@@ -394,7 +373,7 @@ while True:
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
             save_state(state)
-            time.sleep(SLEEP_SECONDS)
+            time.sleep(PRICE_FETCH_DELAY)
             continue
 
         logger.info(f"Current Price: {price:.2f} | SMA9: {sma9:.2f} | SMA21: {sma21:.2f}")
@@ -407,7 +386,9 @@ while True:
         elif sma9 < (sma21 - SMA_BUFFER):
             current_trend = "sell" # SMA9 must be 3 points BELOW SMA21
         else:
-            current_trend = "neutral" # SMAs are too close (within the +/- 3 point buffer zone)
+            logger.info("Neutral trend detected. Keep contuning the same trend.")
+            time.sleep(PRICE_FETCH_DELAY)
+            continue
 
         # 3. Check for SMA Crossover Signal (Signal persistence logic)
         if current_trend == "buy" and state["last_signal"] != "buy":
@@ -445,6 +426,8 @@ while True:
 
         # 5. Save State
         save_state(state)
+        time.sleep(PRICE_FETCH_DELAY)
+        
 
     except Exception as e:
         logger.exception(f"🔥 UNHANDLED ERROR IN MAIN LOOP: {e}")
