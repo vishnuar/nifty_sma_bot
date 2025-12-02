@@ -293,17 +293,19 @@ Option Chain Data (Filtered JSON):
     * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
     * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
     * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
-2.  **Trade Parameters:**
-    * **Take Profit (TP) Target** MUST be set at the strong **Resistance (CE OI)** level.
-    * **Stop Loss (SL) Target** MUST be set at the strong **Conflicting New Writing** level.
 
-3.  **MARKET STRUCTURE (PCR/MAX PAIN) ANALYSIS:**
+2.  **Trade Parameters:**
+    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction, provided it is **not** immediately adjacent to the current Spot Price. This identifies the most dominant structural target.
+    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.
+    * **Confluence:** The selected TP and SL levels should ideally **align with round numbers (e.g., 26000, 26100)** for maximum psychological strength.    
+
+3.  **MARKET STRUCTURE ANALYSIS:**
     * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
 
 4.  **VOLATILITY AND EXPIRY DAY RULE:**
     * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
 
-5.  **Confidence & R/R Constraint (R/R > 1.5):**
+5.  **Confidence**
     * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
     * If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
 
