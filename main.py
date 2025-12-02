@@ -295,11 +295,10 @@ Option Chain Data (Filtered JSON):
     * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
 2.  **Trade Parameters:**
     * **Take Profit (TP) Target** MUST be set at the nearest strong **Resistance (CE OI)** level.
-    * **Stop Loss (SL) Target** MUST be set at the nearest strong **Support (PE OI for BUY) or Resistance (CE OI for SELL)** level on the opposite side of the target.
+    * **Stop Loss (SL) Target** MUST be set at the nearest strong **Conflicting New Writing** level.
 
 3.  **MARKET STRUCTURE (PCR/MAX PAIN) ANALYSIS:**
-    * **PCR Interpretation:** PCR < 0.7 suggests overbought/extreme bearishness (resistance likely). PCR > 1.3 suggests oversold/extreme bullishness (support likely). Use Max Pain as a potential magnet/pivot point.
-    * **New Writing:** Identify **new writing** by looking for strikes where **Change in OI (Chg in OI)** is significantly high, indicating active bearish (CE writing) or bullish (PE writing) fresh activity. This fresh writing confirms the conviction of the market participants.
+    * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
 
 4.  **VOLATILITY AND EXPIRY DAY RULE:**
     * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
@@ -315,7 +314,7 @@ Option Chain Data (Filtered JSON):
 **The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
 
 Example desired format:
-Confidence: High. Signal: Good. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
+Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
 """
 
     try:
