@@ -294,8 +294,8 @@ Option Chain Data (Filtered JSON):
     * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
     * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
 2.  **Trade Parameters:**
-    * **Take Profit (TP) Target** MUST be set at the nearest strong **Resistance (CE OI)** level.
-    * **Stop Loss (SL) Target** MUST be set at the nearest strong **Conflicting New Writing** level.
+    * **Take Profit (TP) Target** MUST be set at the strong **Resistance (CE OI)** level.
+    * **Stop Loss (SL) Target** MUST be set at the strong **Conflicting New Writing** level.
 
 3.  **MARKET STRUCTURE (PCR/MAX PAIN) ANALYSIS:**
     * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
