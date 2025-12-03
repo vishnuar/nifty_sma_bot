@@ -294,10 +294,10 @@ Option Chain Data (Filtered JSON):
     * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
     * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
 
-2.  **Trade Parameters:**
-    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction, provided it is **not** immediately adjacent to the current Spot Price. This identifies the most dominant structural target.
-    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.
-    * **Confluence:** The selected TP and SL levels should ideally **align with round numbers (e.g., 26000, 26100)** for maximum psychological strength.    
+2.  **Trade Parameters (Dominance & Realism Check):**
+    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
+    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration). This prioritizes velocity.
+    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.   
 
 3.  **MARKET STRUCTURE ANALYSIS:**
     * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
