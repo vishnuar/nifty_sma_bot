@@ -307,7 +307,9 @@ Option Chain Data (Filtered JSON):
 
 5.  **Confidence**
     * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
-    * If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
+    * **Tier 1 (Ultimate Risk):** If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
+    * **Tier 2 (High Conviction):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater**.
+    * **Tier 3 (Standard Conviction):** The final confidence MUST NOT be **"High"** unless the calculated R/R ratio is **2.0 or greater**.
 
 --- REQUIRED OUTPUT FORMAT ---
 
