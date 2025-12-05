@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type 
-from nsepython import nse_optionchain_scrapper,pcr
+from nsepython import nse_optionchain_scrapper
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
@@ -154,10 +154,18 @@ def is_market_time() -> bool:
 def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
     if not option_data:
-        return {"max_pain": "N/A", "pcr_value": "N/A"}
+        return {"max_pain": "N/A", "pcr": "N/A"}
 
     # 1. Calculate PCR
-    pcr_value = pcr(nse_optionchain_scrapper('NIFTY'), 0)
+    total_put_oi = 0
+    total_call_oi = 0
+    for record in option_data:
+        if record.get('PE') and isinstance(record['PE'].get('openInterest'), (int, float)):
+            total_put_oi += record['PE']['openInterest']
+        if record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
+            total_call_oi += record['CE']['openInterest']
+
+    pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
 
     # 2. Calculate Max Pain
     max_pain = "N/A"
@@ -184,8 +192,8 @@ def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, A
             min_loss = total_loss_at_strike
             max_pain = strike
 
-    logger.info(f"Max Pain {max_pain:.2f} | PCR: {pcr_value:.2f}")
-    return {"max_pain": max_pain, "pcr": pcr_value}
+    logger.info(f"Max Pain {max_pain:.2f} | PCR: {pcr:.2f}")
+    return {"max_pain": max_pain, "pcr": pcr}
 
 def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
     """Fetches NIFTY options data, calculates Max Pain/PCR, and filters strikes around ATM."""
@@ -211,14 +219,14 @@ def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
         # Calculate Max Pain and PCR using the FULL option chain data
         metrics = calculate_max_pain_and_pcr(full_option_data)
 
-        logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr_value']:.2f}")
+        logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr']:.2f}")
 
         return {
             "spot": spot_price,
             "atm": atm,
             "expiry": expiry,
             "records": filtered_records,
-            "pcr": metrics['pcr_value'],
+            "pcr": metrics['pcr'],
             "max_pain": metrics['max_pain']
         }
     except Exception as e:
@@ -252,7 +260,7 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr_value: float, max_pain: str) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API.
     """
@@ -275,7 +283,7 @@ SMA9: {sma9:.2f}
 SMA21: {sma21:.2f}
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
 Option Expiry Date: {expiry_date}
-Put-Call Ratio (PCR): {pcr_value:.2f}
+Put-Call Ratio (PCR): {pcr:.2f}
 Max Pain Level: {max_pain}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
@@ -410,7 +418,7 @@ while True:
                     sma9=sma9, 
                     sma21=sma21, 
                     signal_type=signal,
-                    pcr=option_chain_result['pcr_value'],
+                    pcr=option_chain_result['pcr'],
                     max_pain=str(option_chain_result['max_pain']) # Pass as string for safety
                 )
                 ai_log_message = ai_result.strip().replace('\n', ' | ')
