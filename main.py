@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type 
-from nsepython import nse_optionchain_scrapper
+from nsepython import nse_optionchain_scrapper,pcr
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
@@ -151,8 +151,44 @@ def is_market_time() -> bool:
 
     return market_open_utc <= now_utc.time() <= market_close_utc
 
+def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
+    if not option_data:
+        return {"max_pain": "N/A", "pcr_value": "N/A"}
+
+    # 1. Calculate PCR
+    pcr_value = pcr(nse_optionchain_scrapper('NIFTY'), 0)
+
+    # 2. Calculate Max Pain
+    max_pain = "N/A"
+    min_loss = float('inf')
+
+    # We use all strike prices from the input data, not just the filtered ones
+    strike_prices = sorted(list(set(r['strikePrice'] for r in option_data)))
+
+    for strike in strike_prices:
+        total_loss_at_strike = 0
+
+        for record in option_data:
+            record_strike = record['strikePrice']
+
+            # Loss for Put Writers (PE is ITM, PE Writers lose)
+            if record_strike < strike and record.get('PE') and isinstance(record['PE'].get('openInterest'), (int, float)):
+                total_loss_at_strike += (strike - record_strike) * record['PE']['openInterest']
+
+            # Loss for Call Writers (CE is ITM, CE Writers lose)
+            if record_strike > strike and record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
+                total_loss_at_strike += (record_strike - strike) * record['CE']['openInterest']
+
+        if total_loss_at_strike < min_loss:
+            min_loss = total_loss_at_strike
+            max_pain = strike
+
+    logger.info(f"Max Pain {max_pain:.2f} | PCR: {pcr_value:.2f}")
+    return {"max_pain": max_pain, "pcr": pcr_value}
+
 def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
-    """Fetches NIFTY options data and filters strikes around ATM."""
+    """Fetches NIFTY options data, calculates Max Pain/PCR, and filters strikes around ATM."""
     try:
         data = nse_optionchain_scrapper("NIFTY")
         spot_price = data['records']['underlyingValue']
@@ -172,11 +208,18 @@ def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
             if record['strikePrice'] in strikes_needed and record['expiryDate'] == expiry
         ]
 
+        # Calculate Max Pain and PCR using the FULL option chain data
+        metrics = calculate_max_pain_and_pcr(full_option_data)
+
+        logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr_value']:.2f}")
+
         return {
             "spot": spot_price,
             "atm": atm,
             "expiry": expiry,
             "records": filtered_records,
+            "pcr": metrics['pcr_value'],
+            "max_pain": metrics['max_pain']
         }
     except Exception as e:
         logger.error(f"❌ Error fetching or processing NSE data: {e}")
@@ -209,7 +252,7 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr_value: float, max_pain: str) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API.
     """
@@ -221,9 +264,9 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     # Extract the expiry date safely from the filtered records list
     expiry_date = option_chain_data[0].get('expiryDate', 'N/A') if option_chain_data else 'N/A'
 
-    # --- REVISED PROMPT---
+    # --- REVISED PROMPT WITH PCR, MAX PAIN, and NEW WRITING LOGIC ---
     user_prompt = f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data to generate a single, actionable, risk-managed trading recommendation.**
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
 
 Input Data:
 Signal: {signal_type}
@@ -232,6 +275,8 @@ SMA9: {sma9:.2f}
 SMA21: {sma21:.2f}
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
 Option Expiry Date: {expiry_date}
+Put-Call Ratio (PCR): {pcr_value:.2f}
+Max Pain Level: {max_pain}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
@@ -263,10 +308,10 @@ Option Chain Data (Filtered JSON):
 
 **Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA and the key OI levels used for TP/SL.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
 
 Example desired format:
-Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, key OI levels, and new PE writing at 25000 confirms conviction.
+Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
 """
 
     try:
@@ -275,7 +320,7 @@ Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP)
             client=client,
             model=GEMINI_MODEL,
             contents=[
-                {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical and options data for actionable, risk-aware advice."}]},
+                {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical, PCR, Max Pain, and options data for actionable, risk-aware advice."}]},
                 {"role": "user", "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
@@ -358,13 +403,15 @@ while True:
             option_chain_result = get_nifty_strikes_for_expiry()
 
             if option_chain_result and option_chain_result['records']:
-                # Call AI
+                # Call AI with new PCR and Max Pain data
                 ai_result = get_ai_trade_suggestion(
                     option_chain_data=option_chain_result['records'], 
                     price=price, 
                     sma9=sma9, 
                     sma21=sma21, 
-                    signal_type=signal
+                    signal_type=signal,
+                    pcr=option_chain_result['pcr_value'],
+                    max_pain=str(option_chain_result['max_pain']) # Pass as string for safety
                 )
                 ai_log_message = ai_result.strip().replace('\n', ' | ')
                 logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
@@ -376,10 +423,8 @@ while True:
         # 5. Save State
         save_state(state)
         time.sleep(PRICE_FETCH_DELAY)
-        
+
 
     except Exception as e:
         logger.exception(f"🔥 UNHANDLED ERROR IN MAIN LOOP: {e}")
         send_telegram(f"*🔥 FATAL ERROR in Trading Bot:*\n`{e}`")
-
-    # Sleep until the next iteration
