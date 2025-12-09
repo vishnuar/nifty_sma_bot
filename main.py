@@ -460,8 +460,8 @@ while True:
             state["prices"] = state["prices"][-50:]
 
         # 2. Calculate SMAs
-        sma9 = calc_sma(state["prices"], 9)
-        sma21 = calc_sma(state["prices"], 21)
+        sma9 = calc_sma(state["prices"], 2)
+        sma21 = calc_sma(state["prices"], 3)
 
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
