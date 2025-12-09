@@ -10,6 +10,7 @@ from nsepython import nse_optionchain_scrapper
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
+from datetime import datetime as dt_datetime, timezone, date
 
 # ---------------------------------------------------------
 ## ⚙️ LOGGING SETUP (Console Only)
@@ -157,7 +158,7 @@ def is_market_time() -> bool:
     9:15 AM IST = 3:45 AM UTC
     3:30 PM IST = 10:00 AM UTC
     """
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc =  dt_datetime.now(timezone.utc)
     weekday = now_utc.weekday()
     if weekday >= 5: # Saturday or Sunday
         return False
@@ -190,7 +191,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
                 expiry_str = contract.get('expiry')
                 if expiry_str:
                     try:
-                        expiry_date = datetime.strptime(expiry_str, '%Y-%m-%d').date()
+                        expiry_date = dt_datetime.strptime(expiry_str, '%Y-%m-%d').date()
                         if expiry_date >= today:
                             expiry_dates.add(expiry_str)
                     except ValueError:
