@@ -338,14 +338,14 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
-    logger.info("Option chanin date" + option_chain_data)
-    logger.info("spot price" + str(price))
-    logger.info("SMA9" + str(sma9))
-    logger.info("SMA21" + str(sma21))
-    logger.info("signal type" + signal_type)
-    logger.info("PCR" + str(pcr))
-    logger.info("Max Pain" + str(max_pain))
-    logger.info("Expiry Date" + expiry_date)
+    logger.info("Option chain data: %s", option_chain_data)
+    logger.info("Spot price: %s", price)
+    logger.info("SMA9: %s", sma9)
+    logger.info("SMA21: %s", sma21)
+    logger.info("Signal type: %s", signal_type)
+    logger.info("PCR: %s", pcr)
+    logger.info("Max Pain: %s", max_pain)
+    logger.info("Expiry Date: %s", expiry_date)
 
     user_prompt = f"""
 **SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
