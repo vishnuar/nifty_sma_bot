@@ -244,6 +244,40 @@ def calculate_max_pain(option_chain_data: list) -> dict:
         "max_pain_value": max_pain_value
     }
 
+def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List[Dict[str, Any]]:
+    """
+    Transforms the verbose Upstox API records into a simplified list 
+    containing only the fields required by the Gemini AI prompt.
+    """
+    ai_prompt_records = []
+    
+    for item in raw_upstox_records:
+        ce_data = item['call_options']
+        pe_data = item['put_options']
+        
+        # CRITICAL: This is the structure required by the AI prompt
+        record = {
+            "strikePrice": item.get('strike_price', 0.0),
+            "expiryDate": expiry_date,
+            "CE": {
+                "openInterest": ce_data['market_data'].get('oi', 0),
+                "changeinOpenInterest": ce_data['market_data'].get('change_in_oi', 0), # Assuming Upstox provides Chg in OI here
+                "Delta": ce_data['option_greeks'].get('delta', 0.0),
+                "IV": ce_data['option_greeks'].get('iv', 0.0),
+                "Theta": ce_data['option_greeks'].get('theta', 0.0)
+            },
+            "PE": {
+                "openInterest": pe_data['market_data'].get('oi', 0),
+                "changeinOpenInterest": pe_data['market_data'].get('change_in_oi', 0), # Assuming Upstox provides Chg in OI here
+                "Delta": pe_data['option_greeks'].get('delta', 0.0),
+                "IV": pe_data['option_greeks'].get('iv', 0.0),
+                "Theta": pe_data['option_greeks'].get('theta', 0.0)
+            }
+        }
+        ai_prompt_records.append(record)
+        
+    return ai_prompt_records
+
 
 def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strikes: int):
     """
@@ -294,6 +328,8 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
         pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
         
         max_pain_results = calculate_max_pain(filtered_chain)
+
+        ai_prompt_records = normalize_upstox_records(filtered_chain, expiry_date)
         
         return {
             "spot": spot_price,
@@ -301,7 +337,7 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
             "expiry": expiry_date,
             "pcr": pcr_value,
             "max_pain": max_pain_results['max_pain_strike'],            
-            "records": filtered_chain
+            "records": ai_prompt_records
         }
 
     except requests.exceptions.RequestException as e:
@@ -348,7 +384,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     logger.info("Expiry Date: %s", expiry_date)
 
     user_prompt = f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, Max Pain, and GREEKS to generate a single, actionable, risk-managed trading recommendation.**
 
 Input Data:
 Signal: {signal_type}
@@ -365,35 +401,37 @@ Option Chain Data (Filtered JSON):
 --- GUIDELINES AND CONSTRAINTS ---
 
 1.  **Definitions & Data Constraint:**
-    * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-    * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
-    * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
+    * **Resistance/Support:** Strong OI or Change in OI build-up.
+    * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strikes provided in the 'Option Chain Data' JSON.
 
-2.  **Trade Parameters (Dominance & Realism Check):**
+2.  **CRITICAL OPTIONS METRICS (GREEKS/IV)**
+    * **IV Check (Risk Filter):** The selected strike's Implied Volatility (IV) MUST be evaluated. If the IV for the suggested option (CE for BUY, PE for SELL) is **above 150.0**, the AI MUST **downgrade the final Confidence Level by one tier.**
+    * **Theta/Delta Selection:** When multiple strikes offer a similar OI advantage, prioritize the strike whose Delta is closest to 0.50 (for higher sensitivity) and whose Theta (time decay) is lowest (for long trades) or highest (for short trades).
+
+3.  **Trade Parameters (Dominance & Realism Check):**
     * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
-    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration). This prioritizes velocity.
-    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.   
+    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points**, the AI MUST look for the next strongest structural barrier **closer** to the Spot Price.
+    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.
 
-3.  **MARKET STRUCTURE ANALYSIS:**
+4.  **MARKET STRUCTURE ANALYSIS:**
     * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
-
-4.  **VOLATILITY AND EXPIRY DAY RULE:**
-    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
 
 5.  **Confidence**
     * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
     * **Tier 1 (Ultimate Risk):** If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
-    * **Tier 2 (High Conviction):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater**.
+    * **Tier 2 (High Conviction - Requires Delta):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater** AND the Delta of the selected strike is between **0.45 and 0.75**.
     * **Tier 3 (Standard Conviction):** The final confidence MUST NOT be **"High"** unless the calculated R/R ratio is **2.0 or greater**.
+    * **VOLATILITY/EXPIRY RULE:** If today's date matches the Option Expiry Date ({expiry_date}), automatically apply a one-tier downgrade to the initial **Confidence Level**.
 
 --- REQUIRED OUTPUT FORMAT ---
 
 **Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, the key OI levels, and the Delta/IV of the selected strike.**
 
 Example desired format:
-Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
+Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, new PE writing at 25000, and Delta 0.65 indicates strong probability.
+
 """
 
     try:
