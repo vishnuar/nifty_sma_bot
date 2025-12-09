@@ -1,4 +1,3 @@
 requests
-nsepython
 google-genai
 tenacity

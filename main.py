@@ -6,7 +6,6 @@ import os
 import logging
 import sys
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type 
-from nsepython import nse_optionchain_scrapper
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
@@ -64,12 +63,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.5-flash" 
 
 STATE_FILE = "state.json"
-MARKET_CLOSE_HOUR_UTC = 12 # 3:30 PM IST is 10:00 AM UTC
+MARKET_CLOSE_HOUR_UTC = 10 # 3:30 PM IST is 10:00 AM UTC
 MARKET_CLOSE_MINUTE_UTC = 0
 
 # --- NEW CONFIGURATION: SMA Buffer (Read from environment) ---
 try:
-    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "0.0"))
+    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "3.0"))
 except ValueError:
     SMA_BUFFER_POINTS = 3.0
     logger.warning("SMA_BUFFER environment variable is invalid. Defaulting to 3.0 points.")
@@ -161,7 +160,7 @@ def is_market_time() -> bool:
         return False
 
     # 9:15 AM IST is 03:45 UTC
-    market_open_utc = datetime.time(3, 45) 
+    market_open_utc = datetime.time(3, 30) 
     # 3:30 PM IST is 10:00 UTC
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
 
@@ -342,6 +341,8 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
         max_pain_results = calculate_max_pain(filtered_chain)
 
         ai_prompt_records = normalize_upstox_records(filtered_chain, expiry_date)
+
+        logger.info(f"Max Pain: {max_pain_results['max_pain_strike']:.2f} | PCR: {pcr_value:.2f}")
         
         return {
             "spot": spot_price,
@@ -385,15 +386,6 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
-
-    logger.info("Option chain data: %s", option_chain_data)
-    logger.info("Spot price: %s", price)
-    logger.info("SMA9: %s", sma9)
-    logger.info("SMA21: %s", sma21)
-    logger.info("Signal type: %s", signal_type)
-    logger.info("PCR: %s", pcr)
-    logger.info("Max Pain: %s", max_pain)
-    logger.info("Expiry Date: %s", expiry_date)
 
     user_prompt = f"""
 **SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, Max Pain, and GREEKS to generate a single, actionable, risk-managed trading recommendation.**
@@ -495,11 +487,8 @@ while True:
             state["prices"] = state["prices"][-50:]
 
         # 2. Calculate SMAs
-        sma9 = calc_sma(state["prices"], 2)
-        sma21 = calc_sma(state["prices"], 3)
-
-        sma9 = 10
-        sma21 = 6
+        sma9 = calc_sma(state["prices"], 9)
+        sma21 = calc_sma(state["prices"], 21)
 
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
