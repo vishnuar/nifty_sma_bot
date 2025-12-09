@@ -42,6 +42,24 @@ except ValueError:
     logger.warning("PRICE_FETCH_DELAY environment variable is invalid. Defaulting to 60 seconds.")
 
 
+#### - UPSTOX CONFIG - ####
+
+UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
+NIFTY_INSTRUMENT_KEY = 'NSE_INDEX|Nifty 50'
+ATM_STRIKES_TO_FETCH = 8 
+CONTRACT_API_URL = 'https://api.upstox.com/v2/option/contract'
+OPTION_CHAIN_API_URL = 'https://api.upstox.com/v2/option/chain'
+
+def get_api_headers(access_token: str) -> dict:
+    """Returns standard headers for Upstox API calls."""
+    return {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {access_token}'
+    }
+
+#### - UPSTOX CONFIG - ####
+
 # Gemini API is used for AI Analysis
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.5-flash" 
@@ -151,87 +169,159 @@ def is_market_time() -> bool:
 
     return market_open_utc <= now_utc.time() <= market_close_utc
 
-def calculate_max_pain_and_pcr(option_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculates Max Pain and Put-Call Ratio (PCR) from the full option chain data."""
-    if not option_data:
-        return {"max_pain": "N/A", "pcr": "N/A"}
+def fetch_closest_expiry(access_token: str) -> str | None:
+    """
+    Step 1: Calls the /option/contract API to find the nearest Nifty expiry date.
+    """
+    print("1. Fetching all Nifty option contracts to find the closest expiry...")
+    
+    headers = get_api_headers(access_token)
+    params = {'instrument_key': NIFTY_INSTRUMENT_KEY}
 
-    # 1. Calculate PCR
-    total_put_oi = 0
-    total_call_oi = 0
-    for record in option_data:
-        if record.get('PE') and isinstance(record['PE'].get('openInterest'), (int, float)):
-            total_put_oi += record['PE']['openInterest']
-        if record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
-            total_call_oi += record['CE']['openInterest']
-
-    pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
-
-    # 2. Calculate Max Pain
-    max_pain = "N/A"
-    min_loss = float('inf')
-
-    # We use all strike prices from the input data, not just the filtered ones
-    strike_prices = sorted(list(set(r['strikePrice'] for r in option_data)))
-
-    for strike in strike_prices:
-        total_loss_at_strike = 0
-
-        for record in option_data:
-            record_strike = record['strikePrice']
-
-            # Loss for Put Writers (PE is ITM, PE Writers lose)
-            if record_strike < strike and record.get('PE') and isinstance(record['PE'].get('openInterest'), (int, float)):
-                total_loss_at_strike += (strike - record_strike) * record['PE']['openInterest']
-
-            # Loss for Call Writers (CE is ITM, CE Writers lose)
-            if record_strike > strike and record.get('CE') and isinstance(record['CE'].get('openInterest'), (int, float)):
-                total_loss_at_strike += (record_strike - strike) * record['CE']['openInterest']
-
-        if total_loss_at_strike < min_loss:
-            min_loss = total_loss_at_strike
-            max_pain = strike
-
-    logger.info(f"Max Pain {max_pain:.2f} | PCR: {pcr:.2f}")
-    return {"max_pain": max_pain, "pcr": pcr}
-
-def get_nifty_strikes_for_expiry() -> Optional[Dict[str, Any]]:
-    """Fetches NIFTY options data, calculates Max Pain/PCR, and filters strikes around ATM."""
     try:
-        data = nse_optionchain_scrapper("NIFTY")
-        spot_price = data['records']['underlyingValue']
-        full_option_data = data['records']['data']
-        expiry_dates = data['records']['expiryDates']
-        if not expiry_dates:
-            logger.warning("❌ No expiry dates found in the NSE data.")
+        response = requests.get(CONTRACT_API_URL, params=params, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get('status') == 'success' and data.get('data'):
+            today = datetime.now().date()
+            expiry_dates = set()
+            for contract in data['data']:
+                expiry_str = contract.get('expiry')
+                if expiry_str:
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, '%Y-%m-%d').date()
+                        if expiry_date >= today:
+                            expiry_dates.add(expiry_str)
+                    except ValueError:
+                        continue
+            
+            if expiry_dates:
+                closest_expiry = min(expiry_dates, key=lambda x: datetime.strptime(x, '%Y-%m-%d'))
+                print(f"   -> Closest Expiry Date found: {closest_expiry}")
+                return closest_expiry
+            else:
+                print("   -> No future expiry dates found.")
+                return None
+        else:
+            print(f"   -> Error or empty response from contract API: {data.get('message', 'Unknown error')}")
             return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"   -> API Request Error in step 1: {e}")
+        return None
 
-        expiry = expiry_dates[0] 
-        atm = round(spot_price / 50) * 50
-        strikes_needed = [atm + i*50 for i in range(-7, 8)] 
+def calculate_max_pain(option_chain_data: list) -> dict:
+    """
+    Calculates the Max Pain strike price.
+    Returns: {"max_pain_strike": strike_price, "max_pain_value": total_loss}
+    """
+    pain_by_strike = {}
+    
+    # Use only unique strikes from the filtered data for calculation points
+    calculation_strikes = sorted(list(set(item['strike_price'] for item in option_chain_data)))
 
-        # Filter records for AI analysis (around ATM)
-        filtered_records = [
-            record for record in full_option_data 
-            if record['strikePrice'] in strikes_needed and record['expiryDate'] == expiry
+    if not calculation_strikes:
+        return {"max_pain_strike": None, "max_pain_value": None}
+    
+    # Iterate over each unique strike as the *potential expiry price*
+    for strike in calculation_strikes:
+        current_strike_loss = 0
+        
+        # Iterate over ALL available contracts in the filtered data
+        for contract in option_chain_data:
+            contract_strike = contract['strike_price']
+            contract_call_oi = contract['call_options'].get('market_data', {}).get('oi', 0)
+            contract_put_oi = contract['put_options'].get('market_data', {}).get('oi', 0)
+            
+            # Loss for Call Writers (Index > Call Strike)
+            if strike > contract_strike:
+                # Loss = OI * (Index - Call Strike)
+                current_strike_loss += contract_call_oi * (strike - contract_strike)
+            
+            # Loss for Put Writers (Index < Put Strike)
+            if strike < contract_strike:
+                # Loss = OI * (Put Strike - Index)
+                current_strike_loss += contract_put_oi * (contract_strike - strike)
+        
+        pain_by_strike[strike] = current_strike_loss
+        
+    # Max Pain is the strike price where the total loss is MINIMUM
+    max_pain_strike = min(pain_by_strike, key=pain_by_strike.get)
+    max_pain_value = pain_by_strike[max_pain_strike]
+    
+    return {
+        "max_pain_strike": max_pain_strike,
+        "max_pain_value": max_pain_value
+    }
+
+
+def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strikes: int):
+    """
+    Step 2: Fetches the full option chain, filters for ATM contracts, and calculates PCR/Max Pain.
+    Returns data in the user-requested format.
+    """
+    print(f"2. Fetching full Option Chain for Expiry: {expiry_date}...")
+
+    headers = get_api_headers(access_token)
+    params = {
+        'instrument_key': NIFTY_INSTRUMENT_KEY,
+        'expiry_date': expiry_date
+    }
+
+    try:
+        response = requests.get(OPTION_CHAIN_API_URL, params=params, headers=headers)
+        response.raise_for_status()
+        chain_data = response.json()
+
+        if chain_data.get('status') != 'success' or not chain_data.get('data'):
+            print(f"   -> Error fetching Option Chain: {chain_data.get('message', 'No data returned')}")
+            return {'status': 'error', 'message': chain_data.get('message', 'No data returned')}
+
+        # --- Filtering Logic (ATM +/- N Contracts) ---
+        all_strikes = [item['strike_price'] for item in chain_data['data']]
+        all_strikes.sort()
+        
+        spot_price = chain_data['data'][0].get('underlying_spot_price', 'N/A')
+        
+        if not all_strikes:
+            return {'status': 'error', 'message': 'No strike prices available.'}
+            
+        atm_strike = min(all_strikes, key=lambda x: abs(x - spot_price))
+        atm_index = all_strikes.index(atm_strike)
+
+        start_index = max(0, atm_index - num_strikes)
+        end_index = min(len(all_strikes), atm_index + num_strikes + 1)
+        
+        selected_strikes_list = sorted(all_strikes[start_index:end_index])
+        selected_strikes_set = set(selected_strikes_list)
+        
+        # Filter the main data to get only the requested strikes
+        filtered_chain = [
+            item for item in chain_data['data'] 
+            if item['strike_price'] in selected_strikes_set
         ]
-
-        # Calculate Max Pain and PCR using the FULL option chain data
-        metrics = calculate_max_pain_and_pcr(full_option_data)
-
-        logger.info(f"Filtered {len(filtered_records)} option records. Max Pain: {metrics['max_pain']}, PCR: {metrics['pcr']:.2f}")
-
+        
+        # --- Calculation of PCR and Max Pain ---
+        total_put_oi = sum(item['put_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
+        total_call_oi = sum(item['call_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
+        pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
+        
+        max_pain_results = calculate_max_pain(filtered_chain)
+        
+        # --- RETURN IN USER-SPECIFIED FORMAT ---
         return {
             "spot": spot_price,
-            "atm": atm,
-            "expiry": expiry,
-            "records": filtered_records,
-            "pcr": metrics['pcr'],
-            "max_pain": metrics['max_pain']
+            "atm": atm_strike,
+            "expiry": expiry_date,
+            "pcr": pcr_value,
+            "max_pain": max_pain_results['max_pain_strike'],            
+            "records": filtered_chain
         }
-    except Exception as e:
-        logger.error(f"❌ Error fetching or processing NSE data: {e}")
-        return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"   -> API Request Error in step 2: {e}")
+        return {'status': 'error', 'message': f'API Request Error: {e}'}
 
 def prepare_gemini_prompt(strike_data: List[Dict[str, Any]]) -> str:
     """Converts filtered strike data into a focused JSON string for the prompt."""
@@ -260,7 +350,7 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, expiry_date: str) -> str:
     """
     Evaluates a trading signal and Nifty Options Chain using the Gemini API.
     """
@@ -269,8 +359,6 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
-    # Extract the expiry date safely from the filtered records list
-    expiry_date = option_chain_data[0].get('expiryDate', 'N/A') if option_chain_data else 'N/A'
 
     # --- REVISED PROMPT WITH PCR, MAX PAIN, and NEW WRITING LOGIC ---
     user_prompt = f"""
@@ -408,7 +496,12 @@ while True:
             logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
             send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
 
-            option_chain_result = get_nifty_strikes_for_expiry()
+            closest_expiry = fetch_closest_expiry(UPSTOX_ACCESS_TOKEN)
+
+            option_chain_result = fetch_and_filter_option_chain(
+                expiry_date=closest_expiry,
+                access_token=UPSTOX_ACCESS_TOKEN,
+                num_strikes=ATM_STRIKES_TO_FETCH)
 
             if option_chain_result and option_chain_result['records']:
                 # Call AI with new PCR and Max Pain data
@@ -419,7 +512,8 @@ while True:
                     sma21=sma21, 
                     signal_type=signal,
                     pcr=option_chain_result['pcr'],
-                    max_pain=str(option_chain_result['max_pain']) # Pass as string for safety
+                    max_pain=str(option_chain_result['max_pain'] ),
+                    expiry_date=closest_expiry
                 )
                 ai_log_message = ai_result.strip().replace('\n', ' | ')
                 logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
