@@ -64,12 +64,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.5-flash" 
 
 STATE_FILE = "state.json"
-MARKET_CLOSE_HOUR_UTC = 10 # 3:30 PM IST is 10:00 AM UTC
+MARKET_CLOSE_HOUR_UTC = 12 # 3:30 PM IST is 10:00 AM UTC
 MARKET_CLOSE_MINUTE_UTC = 0
 
 # --- NEW CONFIGURATION: SMA Buffer (Read from environment) ---
 try:
-    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "3.0"))
+    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "0.0"))
 except ValueError:
     SMA_BUFFER_POINTS = 3.0
     logger.warning("SMA_BUFFER environment variable is invalid. Defaulting to 3.0 points.")
@@ -339,9 +339,52 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-... (your full prompt here; unchanged) ...
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
+
+Input Data:
+Signal: {signal_type}
+Spot Price: {price:.2f}
+SMA9: {sma9:.2f}
+SMA21: {sma21:.2f}
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-...
+Option Expiry Date: {expiry_date}
+Put-Call Ratio (PCR): {pcr:.2f}
+Max Pain Level: {max_pain}
+Option Chain Data (Filtered JSON):
+{option_chain_str}
+
+--- GUIDELINES AND CONSTRAINTS ---
+
+1.  **Definitions & Data Constraint:**
+    * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
+    * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
+    * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
+
+2.  **Trade Parameters (Dominance & Realism Check):**
+    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
+    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration). This prioritizes velocity.
+    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.   
+
+3.  **MARKET STRUCTURE ANALYSIS:**
+    * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
+
+4.  **VOLATILITY AND EXPIRY DAY RULE:**
+    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
+
+5.  **Confidence**
+    * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
+    * **Tier 1 (Ultimate Risk):** If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
+    * **Tier 2 (High Conviction):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater**.
+    * **Tier 3 (Standard Conviction):** The final confidence MUST NOT be **"High"** unless the calculated R/R ratio is **2.0 or greater**.
+
+--- REQUIRED OUTPUT FORMAT ---
+
+**Output MUST be a single, continuous line of plain text and layman words**
+**Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
+
+Example desired format:
+Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
 """
 
     try:
@@ -395,6 +438,9 @@ while True:
         # 2. Calculate SMAs
         sma9 = calc_sma(state["prices"], 2)
         sma21 = calc_sma(state["prices"], 3)
+
+        sma9 = 10
+        sma21 = 6
 
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
