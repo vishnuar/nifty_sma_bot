@@ -255,20 +255,32 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
         ce_data = item['call_options']
         pe_data = item['put_options']
         
+        # --- CALCULATE CHANGE IN OI MANUALLY ---
+        ce_oi_current = ce_data['market_data'].get('oi', 0)
+        ce_oi_prev = ce_data['market_data'].get('prev_oi', 0)
+        
+        pe_oi_current = pe_data['market_data'].get('oi', 0)
+        pe_oi_prev = pe_data['market_data'].get('prev_oi', 0)
+        
+        # Delta OI = Current OI - Previous OI
+        ce_change_in_oi = ce_oi_current - ce_oi_prev
+        pe_change_in_oi = pe_oi_current - pe_oi_prev
+        # --- END MANUAL CALCULATION ---
+        
         # CRITICAL: This is the structure required by the AI prompt
         record = {
             "strikePrice": item.get('strike_price', 0.0),
             "expiryDate": expiry_date,
             "CE": {
-                "openInterest": ce_data['market_data'].get('oi', 0),
-                "changeinOpenInterest": ce_data['market_data'].get('change_in_oi', 0), # Assuming Upstox provides Chg in OI here
+                "openInterest": ce_oi_current,
+                "changeinOpenInterest": ce_change_in_oi,  # <-- FIXED
                 "Delta": ce_data['option_greeks'].get('delta', 0.0),
                 "IV": ce_data['option_greeks'].get('iv', 0.0),
                 "Theta": ce_data['option_greeks'].get('theta', 0.0)
             },
             "PE": {
-                "openInterest": pe_data['market_data'].get('oi', 0),
-                "changeinOpenInterest": pe_data['market_data'].get('change_in_oi', 0), # Assuming Upstox provides Chg in OI here
+                "openInterest": pe_oi_current,
+                "changeinOpenInterest": pe_change_in_oi,  # <-- FIXED
                 "Delta": pe_data['option_greeks'].get('delta', 0.0),
                 "IV": pe_data['option_greeks'].get('iv', 0.0),
                 "Theta": pe_data['option_greeks'].get('theta', 0.0)
