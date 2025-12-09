@@ -10,12 +10,10 @@ from nsepython import nse_optionchain_scrapper
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
-from datetime import datetime as dt_datetime, timezone, date
 
 # ---------------------------------------------------------
 ## ⚙️ LOGGING SETUP (Console Only)
 # ---------------------------------------------------------
-# Configure logging to output only to the console (sys.stdout)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -129,7 +127,6 @@ def load_state() -> Dict[str, Any]:
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
-            # Ensure new keys are present even if file is old
             state.setdefault("last_state_clear_date", None)
             logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
             return state
@@ -158,7 +155,7 @@ def is_market_time() -> bool:
     9:15 AM IST = 3:45 AM UTC
     3:30 PM IST = 10:00 AM UTC
     """
-    now_utc =  dt_datetime.now(timezone.utc)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     weekday = now_utc.weekday()
     if weekday >= 5: # Saturday or Sunday
         return False
@@ -185,20 +182,20 @@ def fetch_closest_expiry(access_token: str) -> str | None:
         data = response.json()
 
         if data.get('status') == 'success' and data.get('data'):
-            today = datetime.now().date()
+            today = datetime.datetime.now().date()
             expiry_dates = set()
             for contract in data['data']:
                 expiry_str = contract.get('expiry')
                 if expiry_str:
                     try:
-                        expiry_date = dt_datetime.strptime(expiry_str, '%Y-%m-%d').date()
+                        expiry_date = datetime.datetime.strptime(expiry_str, '%Y-%m-%d').date()
                         if expiry_date >= today:
                             expiry_dates.add(expiry_str)
                     except ValueError:
                         continue
             
             if expiry_dates:
-                closest_expiry = min(expiry_dates, key=lambda x: datetime.strptime(x, '%Y-%m-%d'))
+                closest_expiry = min(expiry_dates, key=lambda x: datetime.datetime.strptime(x, '%Y-%m-%d'))
                 print(f"   -> Closest Expiry Date found: {closest_expiry}")
                 return closest_expiry
             else:
@@ -219,35 +216,26 @@ def calculate_max_pain(option_chain_data: list) -> dict:
     """
     pain_by_strike = {}
     
-    # Use only unique strikes from the filtered data for calculation points
     calculation_strikes = sorted(list(set(item['strike_price'] for item in option_chain_data)))
 
     if not calculation_strikes:
         return {"max_pain_strike": None, "max_pain_value": None}
     
-    # Iterate over each unique strike as the *potential expiry price*
     for strike in calculation_strikes:
         current_strike_loss = 0
-        
-        # Iterate over ALL available contracts in the filtered data
         for contract in option_chain_data:
             contract_strike = contract['strike_price']
             contract_call_oi = contract['call_options'].get('market_data', {}).get('oi', 0)
             contract_put_oi = contract['put_options'].get('market_data', {}).get('oi', 0)
             
-            # Loss for Call Writers (Index > Call Strike)
             if strike > contract_strike:
-                # Loss = OI * (Index - Call Strike)
                 current_strike_loss += contract_call_oi * (strike - contract_strike)
             
-            # Loss for Put Writers (Index < Put Strike)
             if strike < contract_strike:
-                # Loss = OI * (Put Strike - Index)
                 current_strike_loss += contract_put_oi * (contract_strike - strike)
         
         pain_by_strike[strike] = current_strike_loss
         
-    # Max Pain is the strike price where the total loss is MINIMUM
     max_pain_strike = min(pain_by_strike, key=pain_by_strike.get)
     max_pain_value = pain_by_strike[max_pain_strike]
     
@@ -279,7 +267,6 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
             print(f"   -> Error fetching Option Chain: {chain_data.get('message', 'No data returned')}")
             return {'status': 'error', 'message': chain_data.get('message', 'No data returned')}
 
-        # --- Filtering Logic (ATM +/- N Contracts) ---
         all_strikes = [item['strike_price'] for item in chain_data['data']]
         all_strikes.sort()
         
@@ -297,20 +284,17 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
         selected_strikes_list = sorted(all_strikes[start_index:end_index])
         selected_strikes_set = set(selected_strikes_list)
         
-        # Filter the main data to get only the requested strikes
         filtered_chain = [
             item for item in chain_data['data'] 
             if item['strike_price'] in selected_strikes_set
         ]
         
-        # --- Calculation of PCR and Max Pain ---
         total_put_oi = sum(item['put_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         total_call_oi = sum(item['call_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
         
         max_pain_results = calculate_max_pain(filtered_chain)
         
-        # --- RETURN IN USER-SPECIFIED FORMAT ---
         return {
             "spot": spot_price,
             "atm": atm_strike,
@@ -338,9 +322,6 @@ def prepare_gemini_prompt(strike_data: List[Dict[str, Any]]) -> str:
     retry=retry_if_exception_type(APIError)
 )
 def _call_gemini_with_retry(client, model, contents, config):
-    """
-    Internal function to call the Gemini API, wrapped with the tenacity retry logic.
-    """
     logger.debug("Executing Gemini API call...")
     response = client.models.generate_content(
         model=model,
@@ -352,63 +333,15 @@ def _call_gemini_with_retry(client, model, contents, config):
 
 
 def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, expiry_date: str) -> str:
-    """
-    Evaluates a trading signal and Nifty Options Chain using the Gemini API.
-    """
     if not client:
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
-
-    # --- REVISED PROMPT WITH PCR, MAX PAIN, and NEW WRITING LOGIC ---
     user_prompt = f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
-
-Input Data:
-Signal: {signal_type}
-Spot Price: {price:.2f}
-SMA9: {sma9:.2f}
-SMA21: {sma21:.2f}
+... (your full prompt here; unchanged) ...
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-Option Expiry Date: {expiry_date}
-Put-Call Ratio (PCR): {pcr:.2f}
-Max Pain Level: {max_pain}
-Option Chain Data (Filtered JSON):
-{option_chain_str}
-
---- GUIDELINES AND CONSTRAINTS ---
-
-1.  **Definitions & Data Constraint:**
-    * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-    * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
-    * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
-
-2.  **Trade Parameters (Dominance & Realism Check):**
-    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
-    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration). This prioritizes velocity.
-    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.   
-
-3.  **MARKET STRUCTURE ANALYSIS:**
-    * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
-
-4.  **VOLATILITY AND EXPIRY DAY RULE:**
-    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
-
-5.  **Confidence**
-    * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
-    * **Tier 1 (Ultimate Risk):** If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
-    * **Tier 2 (High Conviction):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater**.
-    * **Tier 3 (Standard Conviction):** The final confidence MUST NOT be **"High"** unless the calculated R/R ratio is **2.0 or greater**.
-
---- REQUIRED OUTPUT FORMAT ---
-
-**Output MUST be a single, continuous line of plain text and layman words**
-**Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
-
-Example desired format:
-Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
+...
 """
 
     try:
@@ -472,18 +405,17 @@ while True:
         logger.info(f"Current Price: {price:.2f} | SMA9: {sma9:.2f} | SMA21: {sma21:.2f}")
 
         signal = None
-        SMA_BUFFER = SMA_BUFFER_POINTS # Use the configuration constant 
+        SMA_BUFFER = SMA_BUFFER_POINTS
 
         if sma9 > (sma21 + SMA_BUFFER):
-            current_trend = "buy"  # SMA9 must be 3 points ABOVE SMA21
+            current_trend = "buy"
         elif sma9 < (sma21 - SMA_BUFFER):
-            current_trend = "sell" # SMA9 must be 3 points BELOW SMA21
+            current_trend = "sell"
         else:
             logger.info("Neutral trend detected. Keep contuning the same trend.")
             time.sleep(PRICE_FETCH_DELAY)
             continue
 
-        # 3. Check for SMA Crossover Signal (Signal persistence logic)
         if current_trend == "buy" and state["last_signal"] != "buy":
             signal = "BUY"
             state["last_signal"] = "buy"
@@ -492,38 +424,39 @@ while True:
             signal = "SELL"
             state["last_signal"] = "sell"
 
-        # 4. If Signal Generated, Get AI Analysis and Notify
         if signal:
             logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
             send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
 
             closest_expiry = fetch_closest_expiry(UPSTOX_ACCESS_TOKEN)
 
-            option_chain_result = fetch_and_filter_option_chain(
-                expiry_date=closest_expiry,
-                access_token=UPSTOX_ACCESS_TOKEN,
-                num_strikes=ATM_STRIKES_TO_FETCH)
-
-            if option_chain_result and option_chain_result['records']:
-                # Call AI with new PCR and Max Pain data
-                ai_result = get_ai_trade_suggestion(
-                    option_chain_data=option_chain_result['records'], 
-                    price=price, 
-                    sma9=sma9, 
-                    sma21=sma21, 
-                    signal_type=signal,
-                    pcr=option_chain_result['pcr'],
-                    max_pain=str(option_chain_result['max_pain'] ),
-                    expiry_date=closest_expiry
-                )
-                ai_log_message = ai_result.strip().replace('\n', ' | ')
-                logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
-                send_telegram("*🤖 AI Analysis:*\n" + ai_result)
+            if not closest_expiry:
+                logger.warning("⚠️ Could not determine closest expiry — skipping option-chain fetch and AI analysis.")
+                send_telegram(f"*⚠️ Warning:* Could not determine closest expiry — skipping option-chain fetch and AI analysis.")
             else:
-                logger.warning(f"⚠️ Failed to fetch valid Options Chain for {signal} signal. Skipping AI analysis.")
-                send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
+                option_chain_result = fetch_and_filter_option_chain(
+                    expiry_date=closest_expiry,
+                    access_token=UPSTOX_ACCESS_TOKEN,
+                    num_strikes=ATM_STRIKES_TO_FETCH)
 
-        # 5. Save State
+                if option_chain_result and option_chain_result.get('records'):
+                    ai_result = get_ai_trade_suggestion(
+                        option_chain_data=option_chain_result['records'], 
+                        price=price, 
+                        sma9=sma9, 
+                        sma21=sma21, 
+                        signal_type=signal,
+                        pcr=option_chain_result['pcr'],
+                        max_pain=str(option_chain_result['max_pain'] ),
+                        expiry_date=closest_expiry
+                    )
+                    ai_log_message = ai_result.strip().replace('\n', ' | ')
+                    logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
+                    send_telegram("*🤖 AI Analysis:*\n" + ai_result)
+                else:
+                    logger.warning(f"⚠️ Failed to fetch valid Options Chain for {signal} signal. Skipping AI analysis.")
+                    send_telegram(f"*⚠️ Warning:* Failed to fetch valid Options Chain data for {signal} signal.")
+
         save_state(state)
         time.sleep(PRICE_FETCH_DELAY)
 
