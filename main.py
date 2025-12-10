@@ -68,7 +68,7 @@ MARKET_CLOSE_MINUTE_UTC = 0
 
 # --- NEW CONFIGURATION: SMA Buffer (Read from environment) ---
 try:
-    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER", "3.0"))
+    SMA_BUFFER_POINTS = float(os.getenv("SMA_BUFFER"))
 except ValueError:
     SMA_BUFFER_POINTS = 3.0
     logger.warning("SMA_BUFFER environment variable is invalid. Defaulting to 3.0 points.")
