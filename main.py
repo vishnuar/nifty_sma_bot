@@ -160,7 +160,7 @@ def is_market_time() -> bool:
         return False
 
     # 9:15 AM IST is 03:45 UTC
-    market_open_utc = datetime.time(3, 30) 
+    market_open_utc = datetime.time(3, 45) 
     # 3:30 PM IST is 10:00 UTC
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
 
