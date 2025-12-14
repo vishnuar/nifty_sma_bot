@@ -44,7 +44,7 @@ except ValueError:
 
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 NIFTY_INSTRUMENT_KEY = 'NSE_INDEX|Nifty 50'
-ATM_STRIKES_TO_FETCH = 8 
+ATM_STRIKES_TO_FETCH = int(os.getenv("STRIKES_TO_FETCH"))
 CONTRACT_API_URL = 'https://api.upstox.com/v2/option/contract'
 OPTION_CHAIN_API_URL = 'https://api.upstox.com/v2/option/chain'
 
@@ -160,7 +160,7 @@ def is_market_time() -> bool:
         return False
 
     # 9:15 AM IST is 03:45 UTC
-    market_open_utc = datetime.time(3, 45) 
+    market_open_utc = datetime.time(3, 30) 
     # 3:30 PM IST is 10:00 UTC
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
 
@@ -207,41 +207,6 @@ def fetch_closest_expiry(access_token: str) -> str | None:
     except requests.exceptions.RequestException as e:
         print(f"   -> API Request Error in step 1: {e}")
         return None
-
-def calculate_max_pain(option_chain_data: list) -> dict:
-    """
-    Calculates the Max Pain strike price.
-    Returns: {"max_pain_strike": strike_price, "max_pain_value": total_loss}
-    """
-    pain_by_strike = {}
-    
-    calculation_strikes = sorted(list(set(item['strike_price'] for item in option_chain_data)))
-
-    if not calculation_strikes:
-        return {"max_pain_strike": None, "max_pain_value": None}
-    
-    for strike in calculation_strikes:
-        current_strike_loss = 0
-        for contract in option_chain_data:
-            contract_strike = contract['strike_price']
-            contract_call_oi = contract['call_options'].get('market_data', {}).get('oi', 0)
-            contract_put_oi = contract['put_options'].get('market_data', {}).get('oi', 0)
-            
-            if strike > contract_strike:
-                current_strike_loss += contract_call_oi * (strike - contract_strike)
-            
-            if strike < contract_strike:
-                current_strike_loss += contract_put_oi * (contract_strike - strike)
-        
-        pain_by_strike[strike] = current_strike_loss
-        
-    max_pain_strike = min(pain_by_strike, key=pain_by_strike.get)
-    max_pain_value = pain_by_strike[max_pain_strike]
-    
-    return {
-        "max_pain_strike": max_pain_strike,
-        "max_pain_value": max_pain_value
-    }
 
 def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List[Dict[str, Any]]:
     """
@@ -290,7 +255,7 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
 
 def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strikes: int):
     """
-    Step 2: Fetches the full option chain, filters for ATM contracts, and calculates PCR/Max Pain.
+    Step 2: Fetches the full option chain, filters for ATM contracts.
     Returns data in the user-requested format.
     """
     print(f"2. Fetching full Option Chain for Expiry: {expiry_date}...")
@@ -332,22 +297,12 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
             if item['strike_price'] in selected_strikes_set
         ]
         
-        total_put_oi = sum(item['put_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
-        total_call_oi = sum(item['call_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
-        pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
-        
-        max_pain_results = calculate_max_pain(filtered_chain)
-
         ai_prompt_records = normalize_upstox_records(filtered_chain, expiry_date)
-
-        logger.info(f"Max Pain: {max_pain_results['max_pain_strike']:.2f} | PCR: {pcr_value:.2f}")
         
         return {
             "spot": spot_price,
             "atm": atm_strike,
-            "expiry": expiry_date,
-            "pcr": pcr_value,
-            "max_pain": max_pain_results['max_pain_strike'],            
+            "expiry": expiry_date,       
             "records": ai_prompt_records
         }
 
@@ -379,14 +334,14 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, expiry_date: str) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, expiry_date: str) -> str:
     if not client:
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt =  f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, Max Pain, Delta, and IV to generate a single, actionable, risk-managed trading recommendation.**
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your role is to treat the SMA signal ONLY as a trigger alert. Your primary function is to analyze the Option Chain data (OI, Delta, IV, and structural checks) to determine trade quality and conviction, generating a single, actionable, risk-managed trading recommendation.**
 
 Input Data:
 Signal: {signal_type}
@@ -394,64 +349,56 @@ Spot Price: {price:.2f}
 SMA9: {sma9:.2f}
 SMA21: {sma21:.2f}
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-Option Expiry Date: {expiry_date}
-Put-Call Ratio (PCR): {pcr:.2f}
-Max Pain Level: {max_pain}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
---- GUIDELINES AND CONSTRAINTS ---
+--- 📋 GUIDELINES AND CONSTRAINTS 📋 ---
 
-1. **Definitions & Data Constraint:**
-  * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-  * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
-  * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
+1. **Definitions & Data Constraint 🧱:**
+* 📉 **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
+* 🛡️ **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
+* 🎯 **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. ❌ DO NOT create a numerical value that is not present.
 
-2. **CRITICAL OPTIONS METRICS (DELTA/IV)**
- * **IV Check (Risk Filter):** The selected strike's Implied Volatility (IV) MUST be evaluated. If the IV for the suggested option (CE for BUY, PE for SELL) is **above 150.0**, the AI MUST **apply a one-tier downgrade** to the assigned Confidence Level.
- * **Delta Selection:** When multiple strikes offer a similar OI advantage, prioritize the strike whose Delta is closest to 0.50 for higher responsiveness and probability.
+2. **Critical Options Metrics (Delta/IV) 🧪:**
+* ☢️ **IV Check (Risk Filter):** The selected strike's Implied Volatility (IV) MUST be evaluated. If the IV for the suggested option (CE for BUY, PE for SELL) is **above 150.0**, the AI MUST **apply a one-tier downgrade** ⬇️ to the assigned Confidence Level.
+* 🔺 **Delta Selection:** When multiple strikes offer a similar OI advantage, prioritize the strike whose Delta is closest to 0.50 for higher responsiveness and probability.
 
-3. **Trade Parameters (Dominance & Structural Checks):**
-  * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
-  * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration).
-  * **TP MINIMUM DISTANCE CHECK:** If the calculated reward (Distance between TP and Entry/Strike Price) is **less than 25 points**, the AI MUST select the **next available strike level** beyond the primary TP target to ensure minimum profitability.
-  * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction.
-  * **SL MINIMUM DISTANCE CHECK (NEW):** If the calculated risk (Distance between Entry/Strike Price and SL) is **less than 50 points**, the AI MUST select the **next available strike level** beyond the primary SL target (e.g., 26100 instead of 26050) to ensure a structurally valid trade and sufficient risk distance.
+3. **Trade Parameters (Dominance & Structural Checks) ⚖️:**
+* ⬆️ **Take Profit (TP) Target):** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
+* ⬇️ **Stop Loss (SL) Target):** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction.
 
-4. **MARKET STRUCTURE ANALYSIS:**
-  * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
-  * **NEUTRALITY RISK CHECK (NEW):** If the **Put-Call Ratio (PCR) is between $0.95$ and $1.05$** (indicating market neutrality), the AI MUST apply a **one-tier downgrade to confidence** due to insufficient conviction for a breakout.
+4. **Market Structure Analysis (Primary Focus) 🔬:**
+* ✍️ **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
+* ⚓ **NEW WRITING CONFIRMATION (CRITICAL - AT LEAST ONE ANCHOR):**
+  * 🟢 **For BUY Signal (OR Logic):** The trade requires at least one strong anchor. This condition is **MET** if **EITHER** the **New Writing (Change in OI) on the CE side** is **actively increasing and positive** (confirming bearish defense), **OR** the **Put Option (PE) Open Interest (OI) at the entry strike** is judged to be a **strong support level** (i.e., above the average OI of the nearest 4 strikes). If **BOTH** conditions fail, the AI MUST apply a **one-tier downgrade** ⬇️.
+  * 🔴 **For SELL Signal (OR Logic):** The trade requires at least one strong anchor. This condition is **MET** if **EITHER** the **New Writing (Change in OI) on the PE side** is **actively increasing and positive** (confirming bullish support), **OR** the **Call Option (CE) Open Interest (OI) at the entry strike** is judged to be a **strong resistance level** (i.e., above the average OI of the nearest 4 strikes). If **BOTH** conditions fail, the AI MUST apply a **one-tier downgrade** ⬇️.
 
-5. **VOLATILITY AND EXPIRY DAY RULE:**
-  * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a **one-tier downgrade** to the assigned Confidence Level (e.g., Very High -> High, High -> Medium, Medium -> Low).
-
-6. **Confidence (Points-Based System)**
-  * **Reward Calculation:** The Reward is the absolute distance between the Take Profit (TP) Strike Price and the Entry/Strike Price.
-  * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
-  * **Initial Assignment (Based on Reward Points):**
-    1. If Reward is **101 points or more**, start with **Very High** Confidence.
-    2. If Reward is between **50 and 100 points**, start with **High** Confidence.
-    3. If Reward is between **25 and 49 points**, start with **Medium** Confidence.
-    4. If Reward is **less than 25 points**, the final confidence MUST be **Low** (Ultimate Risk Filter).
-  * **Risk Filters (Downgrade Rules):** The Confidence level assigned above MUST be downgraded based on any rule violations in sections 2, 4, and 5.
+5. **Confidence (Points-Based System) ⭐:**
+* 💰 **Reward Calculation:** The Reward is the absolute distance between the Take Profit (TP) Strike Price and the Entry/Strike Price.
+* 🏆 **Confidence Level** can be: **(Very High, High, Medium, or Low).**
+* ✨ **Initial Assignment (Based on Reward Points):**
+ 1. If Reward is **101 points or more**, start with **Very High** ⏫ Confidence.
+ 2. If Reward is between **50 and 100 points**, start with **High** ⬆️ Confidence.
+ 3. If Reward is between **25 and 49 points**, start with **Medium** ↔️ Confidence.
+ 4. If Reward is **less than 25 points**, the final confidence MUST be **Low** ⬇️ (Ultimate Risk Filter).
+* 📉 **Risk Filters (Downgrade Rules):** The Confidence level assigned above MUST be downgraded based on any rule violations in sections 2, 4, and 5. **(The Confidence is primarily determined by the structural quality of the option chain, not the SMA alert.)**
 
 --- REQUIRED OUTPUT FORMAT ---
 
 **Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL, and the Delta/IV of the selected strike.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the Option Chain structure (New Writing, OI levels, Delta), and must only mention the SMA as a contextual factor.**
 
 Example desired format:
-Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000, and Delta 0.65 indicates strong probability.
+Confidence: ⭐High. Signal: 🟢Buy. Strike Price: 🎯{{Calculated_Strike_Price}}. Option: CE. Take Profit (TP): ⬆️{{Calculated_TP_Level}}. Stop Loss (SL): ⬇️{{Calculated_SL_Level}}. Max Resistance: 🛑{{Calculated_Max_Resistance}}. Max Support: ✅{{Calculated_Max_Support}}. Reason: Strong new CE writing confirms bearish defense (primary conviction), TP is set by major OI at {{Calculated_TP_Level}}, Delta {{Calculated_Delta}} indicates strong probability, and SMA provides the initial alert.
 """
-    
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
         response_text = _call_gemini_with_retry(
             client=client,
             model=GEMINI_MODEL,
             contents=[
-                {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical, PCR, Max Pain, and options data for actionable, risk-aware advice."}]},
+                {"role": "user", "parts": [{"text": "You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine Open Interest (OI) data, Delta, and IV to generate a single, actionable, risk-managed trading recommendation"}]},
                 {"role": "user", "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
@@ -547,8 +494,6 @@ while True:
                         sma9=sma9, 
                         sma21=sma21, 
                         signal_type=signal,
-                        pcr=option_chain_result['pcr'],
-                        max_pain=str(option_chain_result['max_pain'] ),
                         expiry_date=closest_expiry
                     )
                     ai_log_message = ai_result.strip().replace('\n', ' | ')
