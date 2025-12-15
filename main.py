@@ -352,38 +352,6 @@ Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
---- 📋 GUIDELINES AND CONSTRAINTS 📋 ---
-
-1. **Definitions & Data Constraint 🧱:**
-* 📉 **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-* 🛡️ **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
-* 🎯 **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. ❌ DO NOT create a numerical value that is not present.
-
-2. **Critical Options Metrics (Delta/IV) 🧪:**
-* ☢️ **IV Check (Risk Filter):** The selected strike's Implied Volatility (IV) MUST be evaluated. If the IV for the suggested option (CE for BUY, PE for SELL) is **above 150.0**, the AI MUST **apply a one-tier downgrade** ⬇️ to the assigned Confidence Level.
-* 🔺 **Delta Selection:** When multiple strikes offer a similar OI advantage, prioritize the strike whose Delta is closest to 0.50 for higher responsiveness and probability.
-
-3. **Trade Parameters (Dominance & Structural Checks) ⚖️:**
-* ⬆️ **Take Profit (TP) Target):** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
-* ⬇️ **Stop Loss (SL) Target):** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction.
-
-4. **Market Structure Analysis (Primary Focus) 🔬:**
-* ✍️ **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
-* ⚓ **NEW WRITING CONFIRMATION (CRITICAL - AT LEAST ONE ANCHOR):**
- * 🟢 **For BUY Signal (OR Logic):** New Writing (Change in OI) on the PE side** is **actively accumulating (positive)** (confirming strong support). If this condition fails, the AI MUST apply a **one-tier downgrade** ⬇️.
- * 🔴 **For SELL Signal (OR Logic):** New Writing (Change in OI) on the CE side** is **actively accumulating (positive)** (confirming strong resistance). If this condition fails, the AI MUST apply a **one-tier downgrade** ⬇️.
-  
-
-5. **Confidence (Points-Based System) ⭐:**
-* 💰 **Reward Calculation:** The Reward is the absolute distance between the Take Profit (TP) Strike Price and the Entry/Strike Price.
-* 🏆 **Confidence Level** can be: **(Very High, High, Medium, or Low).**
-* ✨ **Initial Assignment (Based on Reward Points):**
- 1. If Reward is **101 points or more**, start with **Very High** ⏫ Confidence.
- 2. If Reward is between **50 and 100 points**, start with **High** ⬆️ Confidence.
- 3. If Reward is between **25 and 49 points**, start with **Medium** ↔️ Confidence.
- 4. If Reward is **less than 25 points**, the final confidence MUST be **Low** ⬇️ (Ultimate Risk Filter).
-* 📉 **Risk Filters (Downgrade Rules):** The Confidence level assigned above MUST be downgraded based on any rule violations in sections 2, 4, and 5. **(The Confidence is primarily determined by the structural quality of the option chain, not the SMA alert.)**
-
 --- REQUIRED OUTPUT FORMAT ---
 
 **Output MUST be a single, continuous line of plain text and layman words**
@@ -442,8 +410,8 @@ while True:
             state["prices"] = state["prices"][-50:]
 
         # 2. Calculate SMAs
-        sma9 = calc_sma(state["prices"], 9)
-        sma21 = calc_sma(state["prices"], 21)
+        sma9 = calc_sma(state["prices"], 2)
+        sma21 = calc_sma(state["prices"], 3)
 
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
