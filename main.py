@@ -356,7 +356,7 @@ Option Chain Data (Filtered JSON):
 
 **Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the Option Chain structure (New Writing, OI levels, Delta) and give the best reason.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the Option Chain structure (New Writing, OI levels, Delta) and give the best reason. SMA is just an alert only and not a deciding factor**
 
 Example desired format:
 Confidence: ⭐High. Signal: 🟢Buy. Strike Price: 🎯{{Calculated_Strike_Price}}. Option: CE. Take Profit (TP): ⬆️{{Calculated_TP_Level}}. Stop Loss (SL): ⬇️{{Calculated_SL_Level}}. Max Resistance: 🛑{{Calculated_Max_Resistance}}. Max Support: ✅{{Calculated_Max_Support}}. Reason: {{Give the best reason}}.
