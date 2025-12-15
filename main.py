@@ -356,10 +356,10 @@ Option Chain Data (Filtered JSON):
 
 **Output MUST be a single, continuous line of plain text and layman words**
 **Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the Option Chain structure (New Writing, OI levels, Delta), and must only mention the SMA as a contextual factor.**
+**The Reason MUST be a single, concise sentence that justifies the decision by referencing the Option Chain structure (New Writing, OI levels, Delta) and give the best reason.**
 
 Example desired format:
-Confidence: ⭐High. Signal: 🟢Buy. Strike Price: 🎯{{Calculated_Strike_Price}}. Option: CE. Take Profit (TP): ⬆️{{Calculated_TP_Level}}. Stop Loss (SL): ⬇️{{Calculated_SL_Level}}. Max Resistance: 🛑{{Calculated_Max_Resistance}}. Max Support: ✅{{Calculated_Max_Support}}. Reason: Strong new CE writing confirms bearish defense (primary conviction), TP is set by major OI at {{Calculated_TP_Level}}, Delta {{Calculated_Delta}} indicates strong probability, and SMA provides the initial alert.
+Confidence: ⭐High. Signal: 🟢Buy. Strike Price: 🎯{{Calculated_Strike_Price}}. Option: CE. Take Profit (TP): ⬆️{{Calculated_TP_Level}}. Stop Loss (SL): ⬇️{{Calculated_SL_Level}}. Max Resistance: 🛑{{Calculated_Max_Resistance}}. Max Support: ✅{{Calculated_Max_Support}}. Reason: {{Give the best reason}}.
 """
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
