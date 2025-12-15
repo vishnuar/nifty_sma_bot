@@ -387,8 +387,7 @@ Confidence: ⭐Low. Signal: <Buy or Sell>. Reason: Weak or conflicting option ch
         response_text = _call_gemini_with_retry(
             client=client,
             model=GEMINI_MODEL,
-            contents=[
-                {"role": "user", "parts": [{"text": "You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine Open Interest (OI) data, Delta, and IV to generate a single, actionable, risk-managed trading recommendation"}]},
+            contents=[                
                 {"role": "user", "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
@@ -431,8 +430,8 @@ while True:
             state["prices"] = state["prices"][-50:]
 
         # 2. Calculate SMAs
-        sma9 = calc_sma(state["prices"], 2)
-        sma21 = calc_sma(state["prices"], 3)
+        sma9 = calc_sma(state["prices"], 9)
+        sma21 = calc_sma(state["prices"], 21)
 
         if sma9 is None or sma21 is None:
             logger.info(f"Insufficient data ({len(state['prices'])} points) for full SMA calculation. Sleeping.")
