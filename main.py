@@ -370,8 +370,8 @@ Option Chain Data (Filtered JSON):
 4. **Market Structure Analysis (Primary Focus) 🔬:**
 * ✍️ **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
 * ⚓ **NEW WRITING CONFIRMATION (CRITICAL - AT LEAST ONE ANCHOR):**
-  * 🟢 **For BUY Signal (OR Logic):**New Writing (Change in OI) on the CE side** is **actively increasing and positive** (confirming bearish defense)
-  * 🔴 **For SELL Signal (OR Logic):**New Writing (Change in OI) on the PE side** is **actively increasing and positive** (confirming bullish support)
+ * 🟢 **For BUY Signal (OR Logic):** New Writing (Change in OI) on the PE side** is **actively accumulating (positive)** (confirming strong support). If this condition fails, the AI MUST apply a **one-tier downgrade** ⬇️.
+ * 🔴 **For SELL Signal (OR Logic):** New Writing (Change in OI) on the CE side** is **actively accumulating (positive)** (confirming strong resistance). If this condition fails, the AI MUST apply a **one-tier downgrade** ⬇️.
   
 
 5. **Confidence (Points-Based System) ⭐:**
