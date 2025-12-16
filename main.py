@@ -343,44 +343,57 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     user_prompt = f"""
 SYSTEM ROLE:
 You are a highly specialized and experienced NIFTY options market analyst and strategist.
-Your PRIMARY decision authority is Option Chain structure (OI, Change in OI, Delta, IV).
-The SMA signal is ONLY a trigger alert and MUST NOT be treated as a deciding factor.
-
-If the Option Chain structure is weak, conflicted, or lacks conviction,
-you MUST downgrade confidence or clearly state low-quality trade conditions.
+Your ONLY goal is to analyze Option Chain structure (Open Interest, Change in Open Interest, Delta, IV, and strike positioning) to determine the true market state, trend, or reversal.
+The SMA signal is ONLY a trigger alert and MUST NOT influence conviction, confidence, or trend determination.
 
 INPUT DATA:
 Signal Trigger: {signal_type}
-Spot Price: {price:.2f}
-SMA9 (Trigger Only): {sma9:.2f}
-SMA21 (Trigger Only): {sma21:.2f}
+Spot Price: {price}
+SMA9: {sma9}
+SMA21: {sma21}
 Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
-DECISION RULES (STRICT):
-1. The trade decision MUST be derived from Option Chain structure ONLY.
-2. New Writing (Change in OI) has higher priority than absolute OI.
-3. Delta must support direction (≈0.50 preferred).
-4. SMA may be mentioned ONLY as a trigger confirmation, not as justification.
-5. If conviction is weak, confidence MUST be Medium or Low.
-6. Do NOT hedge, speculate, or provide multiple possibilities.
+PRIMARY OBJECTIVE:
+1) Identify the exact market state using ONLY option-chain behavior.
+2) Decide whether the market is in:
+   - Bullish Trend (Continuation)
+   - Bearish Trend (Continuation)
+   - Bullish Reversal (Early or Confirmed)
+   - Bearish Reversal (Early or Confirmed)
+   - Sideways / No-Trade Zone
+3) If the market state is Sideways / No-Trade Zone, you MUST return No Trade.
+4) If a trade exists, select strikes ONLY from the provided option chain JSON.
 
-OUTPUT FORMAT RULES (MANDATORY):
-- Output MUST be a SINGLE LINE of plain text
-- NO new lines
-- NO markdown symbols (* _ ` [])
-- Use simple layman language
-- Use EXACT key order and wording as below
+MANDATORY OPTION-CHAIN LOGIC:
+- 📈 Bullish Trend → Strong PE OI build-up, rising PE Delta, CE unwinding
+- 📉 Bearish Trend → Strong CE OI build-up, rising CE Delta, PE unwinding
+- 🔄 Bullish Reversal → CE unwinding + fresh PE writing near ATM
+- 🔄 Bearish Reversal → PE unwinding + fresh CE writing near ATM
+- ⚖️ Sideways → Balanced OI, weak Delta, conflicting writing
 
-REQUIRED OUTPUT FORMAT:
-Confidence: ⭐<Very High|High|Medium|Low>. Signal: 🟢Buy or 🔴Sell. Strike Price: 🎯<Strike>. Option: CE or PE. Take Profit (TP): ⬆️<TP Strike>. Stop Loss (SL): ⬇️<SL Strike>. Max Resistance: 🛑<Strike>. Max Support: ✅<Strike>. Reason: <One short sentence explaining the option-chain-based conviction>.
+CONFIDENCE RULES:
+- 🎯 Reward = Absolute difference between Entry Strike and Take Profit Strike
+- ⭐ Initial Confidence:
+  - ≥101 points → Very High
+  - 50-100 points → High
+  - 25-49 points → Medium
+  - <25 points → Low (MANDATORY)
+- ⬇️ Downgrade confidence by one level if:
+  - IV > 150 at entry strike
+  - No clear OI dominance
+  - Reversal is early and not confirmed
 
-IMPORTANT:
-If Option Chain structure does NOT justify the trade,
-you MUST return:
-Confidence: ⭐Low. Signal: <Buy or Sell>. Reason: Weak or conflicting option chain structure, trade quality is low.
+STRICT OUTPUT RULES (NON-NEGOTIABLE):
+- Output MUST be exactly ONE single line
+- NO line breaks
+- NO markdown
+- NO bullet points
+- Plain text + emojis only
+
+REQUIRED OUTPUT FORMAT (ONE LINE ONLY):
+Confidence: ⭐<Very High|High|Medium|Low>. Market State: <📈 Bullish Trend (Continuation)|📉 Bearish Trend (Continuation)|🔄 Bullish Reversal (Early or Confirmed)|🔄 Bearish Reversal (Early or Confirmed)|⚖️ Sideways / No-Trade Zone>. Signal: <🟢Buy|🔴Sell|⚪No Trade>. Strike Price: 🎯<Strike or NA>. Option: <CE|PE|NA>. Take Profit (TP): ⬆️<Strike or NA>. Stop Loss (SL): ⬇️<Strike or NA>. Max Resistance: 🛑<Strike or NA>. Max Support: ✅<Strike or NA>. Reason: Trend: <Exact market state>, <one concise option-chain-based justification referencing OI, Change in OI, Delta, and strike behavior; SMA mentioned only as a trigger>.
 """
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
