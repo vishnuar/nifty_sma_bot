@@ -362,12 +362,17 @@ MANDATORY DECISION LOGIC:
 2. TRADE SELECTION:
    - Priority: New Writing (Chg in OI) > Absolute OI.
    - Strikes MUST be selected ONLY from the provided JSON.
-3. CONFIDENCE (Reward = |Entry Strike - TP Strike|):
-   - Initial ⭐ Tiers: ≥101 pts (Very High); 50-100 pts (High); 25-49 pts (Medium); <25 pts (Low).
-   - ⬇️ Downgrade 1 level if:
+3. SIGNAL CONSISTENCY (CRITICAL): The final recommended Option contract MUST align with the Signal:
+   - If Signal is 🟢Buy: Option MUST be **CE**.
+   - If Signal is 🔴Sell: Option MUST be **PE**. (This ensures a directional BUY strategy).
+4. CONFIDENCE SCORING:
+   - Initial ⭐ Tiers (Reward = |Entry Strike - TP Strike|):
+     - ≥101 pts (Very High); 50-100 pts (High); 25-49 pts (Medium); <25 pts (Low).
+   - ⬇️ Downgrade 1 level if ANY applies:
      - IV > 150 at entry strike.
      - No clear OI dominance/Reversal is Early.
-4. FINAL: NO hedging/speculation.
+     - Market State (e.g., Bearish Reversal) CONTRADICTS the Signal Trigger (e.g., BUY). (Return ⚪No Trade if contradiction is severe).
+5. FINAL: NO hedging/speculation.
 
 STRICT OUTPUT FORMAT (NON-NEGOTIABLE - ONE LINE ONLY):
 Confidence: ⭐<Very High|High|Medium|Low>. Market State: <📈 Bullish Trend (Continuation)|...|⚖️ Sideways / No-Trade Zone>. Signal: <🟢Buy|🔴Sell|⚪No Trade>. Strike Price: 🎯<Strike or NA>. Option: <CE|PE|NA>. Take Profit (TP): ⬆️<Strike or NA>. Stop Loss (SL): ⬇️<Strike or NA>. Max Resistance: 🛑<Strike or NA>. Max Support: ✅<Strike or NA>. Reason: Trend: <Exact market state>, <concise option-chain justification referencing OI/Chg in OI/Delta/strike>.
