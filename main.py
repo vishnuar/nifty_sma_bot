@@ -341,41 +341,98 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-SYSTEM ROLE: NIFTY options strategist. Analyze Option Chain (OI, Chg in OI, Delta, IV) for market state/trend/reversal. SMA is ONLY a trigger. Downgrade confidence if chain is weak.
+SYSTEM ROLE: Expert NIFTY options analyst. Your PRIMARY task is to analyze the Option Chain (OI, Chg in OI, Delta, IV) to determine market direction and identify high-probability trade setups. SMA signals are SECONDARY triggers only—they do NOT override weak option chain signals.
+
+---
 
 INPUT DATA:
-Trigger: {signal_type}
-Spot: {price}
-SMA9: {sma9}
-SMA21: {sma21}
-Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-Option Chain (JSON):
+- Signal Trigger: {signal_type}
+- NIFTY Spot Price: ₹{price}
+- SMA9: ₹{sma9}
+- SMA21: ₹{sma21}
+- Analysis Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
+
+Option Chain Data (JSON):
 {option_chain_str}
 
-MANDATORY DECISION LOGIC:
-1. MARKET STATE (Primary Objective - Use only Option Chain):
-   - 📈 Bullish Trend: Strong PE OI build, rising PE Delta, CE unwinding.
-   - 📉 Bearish Trend: Strong CE OI build, rising CE Delta, PE unwinding.
-   - 🔄 Bullish Reversal: CE unwind + fresh PE writing near ATM.
-   - 🔄 Bearish Reversal: PE unwind + fresh CE writing near ATM.
-   - ⚖️ Sideways: Balanced/Conflicting OI, weak Delta. (MUST return ⚪No Trade).
-2. TRADE SELECTION:
-   - Priority: New Writing (Chg in OI) > Absolute OI.
-   - Strikes MUST be selected ONLY from the provided JSON.
-3. SIGNAL CONSISTENCY (CRITICAL): The final recommended Option contract MUST align with the Signal:
-   - If Signal is 🟢Buy: Option MUST be **CE**.
-   - If Signal is 🔴Sell: Option MUST be **PE**. (This ensures a directional BUY strategy).
-4. CONFIDENCE SCORING:
-   - Initial ⭐ Tiers (Reward = |Entry Strike - TP Strike|):
-     - ≥101 pts (Very High); 50-100 pts (High); 25-49 pts (Medium); <25 pts (Low).
-   - ⬇️ Downgrade 1 level if ANY applies:
-     - IV > 150 at entry strike.
-     - No clear OI dominance/Reversal is Early.
-     - Market State (e.g., Bearish Reversal) CONTRADICTS the Signal Trigger (e.g., BUY). (Return ⚪No Trade if contradiction is severe).
-5. FINAL: NO hedging/speculation.
+GUIDELINES FOR ANALYSIS & TRADE RECOMMENDATION:
+### 1. MARKET STATE IDENTIFICATION (Use Option Chain ONLY)
+Analyze OI patterns, Delta shifts, and IV to classify market state:
 
-STRICT OUTPUT FORMAT (NON-NEGOTIABLE - ONE LINE ONLY):
-Confidence: ⭐<Very High|High|Medium|Low>. Market State: <📈 Bullish Trend (Continuation)|...|⚖️ Sideways / No-Trade Zone>. Signal: <🟢Buy|🔴Sell|⚪No Trade>. Strike Price: 🎯<Strike or NA>. Option: <CE|PE|NA>. Take Profit (TP): ⬆️<Strike or NA>. Stop Loss (SL): ⬇️<Strike or NA>. Max Resistance: 🛑<Strike or NA>. Max Support: ✅<Strike or NA>. Reason: Trend: <Exact market state>, <concise option-chain justification referencing OI/Chg in OI/Delta/strike>.
+**Bullish Conditions:**
+- 📈 **Strong Trend**: High PE OI accumulation (Chg in OI > 10% of total OI), rising PE Delta (>0.4 at ITM strikes), CE unwinding (negative Chg in OI at OTM strikes).
+- 🔄 **Reversal Signal**: Significant CE unwinding near ATM (Chg in OI < -15%), fresh PE writing (positive Chg in OI) at/below ATM, IV compression (<120) at entry strike.
+
+**Bearish Conditions:**
+- 📉 **Strong Trend**: High CE OI accumulation, rising CE Delta (>0.4 at ITM strikes), PE unwinding at OTM strikes.
+- 🔄 **Reversal Signal**: Significant PE unwinding near ATM, fresh CE writing at/above ATM, IV compression at entry strike.
+
+**Neutral/No-Trade Conditions:**
+- ⚖️ **Sideways Market**: Balanced OI across CE/PE (difference <20%), weak Delta signals (all <0.3), conflicting Chg in OI patterns, or IV spike (>150) across multiple strikes.
+
+### 2. STRIKE SELECTION CRITERIA
+- **Entry Strike**: Select from JSON based on:
+  - Maximum positive Chg in OI for the trade direction (CE for bullish, PE for bearish)
+  - Strike within ±5% of spot price
+  - Delta between 0.35-0.55 (balance risk/reward)
+  - IV <140 (avoid overpriced options)
+  
+- **Take Profit (TP)**: Next major resistance (bullish) or support (bearish) based on:
+  - High absolute OI concentration (>1.5x average OI)
+  - Strike where opposite option type shows strong buildup
+  
+- **Stop Loss (SL)**: Strike where market state reverses:
+  - For CE: Strike below entry where PE OI dominates
+  - For PE: Strike above entry where CE OI dominates
+  - Distance: Minimum 1.5:1 reward-to-risk ratio
+
+### 3. SIGNAL VALIDATION (CRITICAL GATE)
+**MUST-PASS CHECKS:**
+- ✅ Signal Consistency: 
+  - 🟢 BUY Signal → ONLY recommend CE options
+  - 🔴 SELL Signal → ONLY recommend PE options
+  
+- ✅ Option Chain Confirmation:
+  - If Signal = BUY but Option Chain shows Bearish Trend → Return ⚪ No Trade
+  - If Signal = SELL but Option Chain shows Bullish Trend → Return ⚪ No Trade
+  - Reversal signals MUST have clear unwinding (Chg in OI magnitude >20% of strike's total OI)
+
+- ✅ Risk Parameters:
+  - IV at entry strike MUST be <150
+  - TP strike MUST exist in provided JSON
+  - Reward (Entry to TP) MUST be ≥1.5x Risk (Entry to SL)
+
+### 4. CONFIDENCE SCORING ALGORITHM
+**Base Confidence (Reward Points):**
+- ≥101 pts: Very High ⭐⭐⭐⭐
+- 50-100 pts: High ⭐⭐⭐
+- 25-49 pts: Medium ⭐⭐
+- <25 pts: Low ⭐
+
+**Downgrade by ONE level if ANY apply:**
+- IV at entry strike >140
+- OI dominance ratio <1.5:1 (winning side OI vs opposing side)
+- Reversal pattern but Chg in OI magnitude <15% of total OI
+- Signal contradicts dominant market state (even slightly)
+
+**Auto-Reject (⚪ No Trade) if:**
+- Market State is ⚖️ Sideways
+- Signal and Option Chain completely contradict (Bullish Chain + SELL signal)
+- No suitable strikes meet risk/reward criteria
+- IV >160 at entry strike
+
+---
+
+STRICT OUTPUT FORMAT (SINGLE LINE - NO DEVIATIONS):
+Confidence: <⭐⭐⭐⭐ Very High|⭐⭐⭐ High|⭐⭐ Medium|⭐ Low>. Market State: <📈 Bullish Trend|📉 Bearish Trend|🔄 Bullish Reversal|🔄 Bearish Reversal|⚖️ Sideways>. Signal: <🟢 BUY|🔴 SELL|⚪ NO TRADE>. Strike Price: 🎯<₹XXXXX or NA>. Option: <CE|PE|NA>. Entry IV: <XX.X% or NA>. Take Profit: ⬆️<₹XXXXX or NA>. Stop Loss: ⬇️<₹XXXXX or NA>. Reward:Risk: <X.XX:1 or NA>. Max Resistance: 🛑<₹XXXXX or NA>. Max Support: ✅<₹XXXXX or NA>. Reason: <Market state>, <Key OI/Chg in OI observations with specific strike references>, <Delta/IV justification>, <Why this strike was selected>.
+
+---
+
+CRITICAL REMINDERS:
+- NEVER recommend hedging strategies or multi-leg trades
+- NEVER select strikes not present in the JSON
+- ALWAYS verify Signal-to-Option type consistency before final output
+- Return ⚪ NO TRADE when in doubt—preservation of capital is priority
 """
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
