@@ -211,7 +211,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
 def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List[Dict[str, Any]]:
     """
     Transforms the verbose Upstox API records into a simplified list 
-    containing only the fields required by the Gemini AI prompt.
+    containing only the fields required by the Gemini AI prompt, now including VOLUME.
     """
     ai_prompt_records = []
     
@@ -219,31 +219,36 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
         ce_data = item['call_options']
         pe_data = item['put_options']
         
-        # --- CALCULATE CHANGE IN OI MANUALLY ---
+        # --- OPEN INTEREST & VOLUME EXTRACTION ---
+        # Call Data
         ce_oi_current = ce_data['market_data'].get('oi', 0)
         ce_oi_prev = ce_data['market_data'].get('prev_oi', 0)
-        
+        ce_volume = ce_data['market_data'].get('volume', 0) # Added Volume
+
+        # Put Data
         pe_oi_current = pe_data['market_data'].get('oi', 0)
         pe_oi_prev = pe_data['market_data'].get('prev_oi', 0)
+        pe_volume = pe_data['market_data'].get('volume', 0) # Added Volume
         
-        # Delta OI = Current OI - Previous OI
+        # --- CALCULATE CHANGE IN OI MANUALLY ---
         ce_change_in_oi = ce_oi_current - ce_oi_prev
         pe_change_in_oi = pe_oi_current - pe_oi_prev
-        # --- END MANUAL CALCULATION ---
         
-        # CRITICAL: This is the structure required by the AI prompt
+        # --- BUILD STRUCTURE FOR AI PROMPT ---
         record = {
             "strikePrice": item.get('strike_price', 0.0),
             "expiryDate": expiry_date,
             "CE": {
                 "openInterest": ce_oi_current,
                 "changeinOpenInterest": ce_change_in_oi,
+                "volume": ce_volume,  # New field for AI analysis
                 "Delta": ce_data['option_greeks'].get('delta', 0.0),
                 "IV": ce_data['option_greeks'].get('iv', 0.0)                
             },
             "PE": {
                 "openInterest": pe_oi_current,
                 "changeinOpenInterest": pe_change_in_oi,
+                "volume": pe_volume,  # New field for AI analysis
                 "Delta": pe_data['option_greeks'].get('delta', 0.0),
                 "IV": pe_data['option_greeks'].get('iv', 0.0)                
             }
@@ -341,98 +346,45 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-SYSTEM ROLE: Expert NIFTY options analyst. Your PRIMARY task is to analyze the Option Chain (OI, Chg in OI, Delta, IV) to determine market direction and identify high-probability trade setups. SMA signals are SECONDARY triggers only—they do NOT override weak option chain signals.
+<ROLE>NIFTY Quant Strategist. Logic: Option Chain (OI + Volume) > SMA.</ROLE>
 
----
+<DATA>
+Trigger: {signal_type} | Spot: {price} | SMA9: {sma9} | SMA21: {sma21}
+JSON: {option_chain_str}
+</DATA>
 
-INPUT DATA:
-- Signal Trigger: {signal_type}
-- NIFTY Spot Price: ₹{price}
-- SMA9: ₹{sma9}
-- SMA21: ₹{sma21}
-- Analysis Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
+<LOGIC_ENGINE>
+1. SCAN_WALLS:
+   - MR (Max Resistance): Strike with Max(Call_OI) + Max(Call_Vol).
+   - MS (Max Support): Strike with Max(Put_OI) + Max(Put_Vol).
+   - ZONE: Set "AT_WALL" if Spot within 15pts of MR or MS.
 
-Option Chain Data (JSON):
-{option_chain_str}
+2. STATE_CHECK (Volume-Validated):
+   - 📈 BULL: PE_OI_Chg > 10% + PE_Vol > CE_Vol + CE_Unwinding.
+   - 📉 BEAR: CE_OI_Chg > 10% + CE_Vol > PE_Vol + PE_Unwinding.
+   - 🔄 REVERSAL: ZONE=TRUE + Vol_Spike > 1.5x_Avg + Opposite Side fresh writing.
+   - ⚖️ SIDEWAYS: Abs(CE_Vol - PE_Vol) < 10% OR Spot trapped between MR/MS -> ⚪ NO TRADE.
 
-GUIDELINES FOR ANALYSIS & TRADE RECOMMENDATION:
-### 1. MARKET STATE IDENTIFICATION (Use Option Chain ONLY)
-Analyze OI patterns, Delta shifts, and IV to classify market state:
+3. TRAP_PROTECTION (Volume Logic):
+   - [SELL_TRAP]: Signal=🔴SELL + ZONE=MS + PE_Vol rising + PE_Unwinding=FALSE -> ⚪ NO TRADE.
+   - [BUY_TRAP]: Signal=🟢BUY + ZONE=MR + CE_Vol rising + CE_Unwinding=FALSE -> ⚪ NO TRADE.
+   - [FAKE_MOVE]: Price moves but Vol is declining -> Reduce Confidence 1 tier.
 
-**Bullish Conditions:**
-- 📈 **Strong Trend**: High PE OI accumulation (Chg in OI > 10% of total OI), rising PE Delta (>0.4 at ITM strikes), CE unwinding (negative Chg in OI at OTM strikes).
-- 🔄 **Reversal Signal**: Significant CE unwinding near ATM (Chg in OI < -15%), fresh PE writing (positive Chg in OI) at/below ATM, IV compression (<120) at entry strike.
+4. TARGETS:
+   - SL: 10pts outside defending MS/MR wall.
+   - TP: Next major Strike_OI/Vol_Cluster or 0.60 Delta zone.
+</LOGIC_ENGINE>
 
-**Bearish Conditions:**
-- 📉 **Strong Trend**: High CE OI accumulation, rising CE Delta (>0.4 at ITM strikes), PE unwinding at OTM strikes.
-- 🔄 **Reversal Signal**: Significant PE unwinding near ATM, fresh CE writing at/above ATM, IV compression at entry strike.
+<SCORING>
+- Base: >=101pts (⭐⭐⭐⭐) | 50-100pts (⭐⭐⭐) | 25-49pts (⭐⭐) | <25pts (⭐).
+- Volume Bonus: +1 star if Entry_Strike_Vol > 2x Avg_Neighbor_Vol.
+- Penalty: -2 stars if ZONE=TRUE + State conflicts Trigger.
+</SCORING>
 
-**Neutral/No-Trade Conditions:**
-- ⚖️ **Sideways Market**: Balanced OI across CE/PE (difference <20%), weak Delta signals (all <0.3), conflicting Chg in OI patterns, or IV spike (>150) across multiple strikes.
-
-### 2. STRIKE SELECTION CRITERIA
-- **Entry Strike**: Select from JSON based on:
-  - Maximum positive Chg in OI for the trade direction (CE for bullish, PE for bearish)
-  - Strike within ±5% of spot price
-  - Delta between 0.35-0.55 (balance risk/reward)
-  - IV <140 (avoid overpriced options)
-  
-- **Take Profit (TP)**: Next major resistance (bullish) or support (bearish) based on:
-  - High absolute OI concentration (>1.5x average OI)
-  - Strike where opposite option type shows strong buildup
-  
-- **Stop Loss (SL)**: Strike where market state reverses:
-  - For CE: Strike below entry where PE OI dominates
-  - For PE: Strike above entry where CE OI dominates
-  - Distance: Minimum 1.5:1 reward-to-risk ratio
-
-### 3. SIGNAL VALIDATION (CRITICAL GATE)
-**MUST-PASS CHECKS:**
-- ✅ Signal Consistency: 
-  - 🟢 BUY Signal → ONLY recommend CE options
-  - 🔴 SELL Signal → ONLY recommend PE options
-  
-- ✅ Option Chain Confirmation:
-  - If Signal = BUY but Option Chain shows Bearish Trend → Return ⚪ No Trade
-  - If Signal = SELL but Option Chain shows Bullish Trend → Return ⚪ No Trade
-  - Reversal signals MUST have clear unwinding (Chg in OI magnitude >20% of strike's total OI)
-
-- ✅ Risk Parameters:
-  - IV at entry strike MUST be <150
-  - TP strike MUST exist in provided JSON
-  - Reward (Entry to TP) MUST be ≥1.5x Risk (Entry to SL)
-
-### 4. CONFIDENCE SCORING ALGORITHM
-**Base Confidence (Reward Points):**
-- ≥101 pts: Very High ⭐⭐⭐⭐
-- 50-100 pts: High ⭐⭐⭐
-- 25-49 pts: Medium ⭐⭐
-- <25 pts: Low ⭐
-
-**Downgrade by ONE level if ANY apply:**
-- IV at entry strike >140
-- OI dominance ratio <1.5:1 (winning side OI vs opposing side)
-- Reversal pattern but Chg in OI magnitude <15% of total OI
-- Signal contradicts dominant market state (even slightly)
-
-**Auto-Reject (⚪ No Trade) if:**
-- Market State is ⚖️ Sideways
-- Signal and Option Chain completely contradict (Bullish Chain + SELL signal)
-- No suitable strikes meet risk/reward criteria
-- IV >160 at entry strike
-
----
-
-STRICT OUTPUT FORMAT (SINGLE LINE - NO DEVIATIONS):
-Confidence: <⭐⭐⭐⭐ Very High|⭐⭐⭐ High|⭐⭐ Medium|⭐ Low>. Market State: <📈 Bullish Trend|📉 Bearish Trend|🔄 Bullish Reversal|🔄 Bearish Reversal|⚖️ Sideways>. Signal: <🟢 BUY|🔴 SELL|⚪ NO TRADE>. Strike Price: 🎯<₹XXXXX or NA>. Option: <CE|PE|NA>. Entry IV: <XX.X% or NA>. Take Profit: ⬆️<₹XXXXX or NA>. Stop Loss: ⬇️<₹XXXXX or NA>. Reward:Risk: <X.XX:1 or NA>. Max Resistance: 🛑<₹XXXXX or NA>. Max Support: ✅<₹XXXXX or NA>. Reason: <Market state>, <Key OI/Chg in OI observations with specific strike references>, <Delta/IV justification>, <Why this strike was selected>.
-
----
-
-CRITICAL REMINDERS:
-- NEVER recommend hedging strategies or multi-leg trades
-- NEVER select strikes not present in the JSON
-- ALWAYS verify Signal-to-Option type consistency before final output
-- Return ⚪ NO TRADE when in doubt—preservation of capital is priority
+<OUTPUT_CONTRACT>
+ONE LINE ONLY. NO MARKDOWN. 🟢BUY = CE | 🔴SELL = PE.
+Confidence: <Level>. Market State: <State>. Signal: <🟢 BUY|🔴 SELL|⚪ NO TRADE>. Strike Price: 🎯<₹XXXXX>. Option: <CE|PE>. Entry IV: <XX.X%>. Take Profit: ⬆️<₹XXXXX>. Stop Loss: ⬇️<₹XXXXX>. Reward:Risk: <X.XX:1>. Max Resistance: 🛑<₹XXXXX>. Max Support: ✅<₹XXXXX>. Reason: <State>, <Volume/OI confirmation at walls>, <Delta/IV justification>.
+</OUTPUT_CONTRACT>
 """
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
