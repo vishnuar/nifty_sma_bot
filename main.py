@@ -376,9 +376,14 @@ JSON: {option_chain_str}
 </LOGIC_ENGINE>
 
 <SCORING>
-- Base: >=101pts (⭐⭐⭐⭐) | 50-100pts (⭐⭐⭐) | 25-49pts (⭐⭐) | <25pts (⭐).
-- Volume Bonus: +1 star if Entry_Strike_Vol > 2x Avg_Neighbor_Vol.
-- Penalty: -2 stars if ZONE=TRUE + State conflicts Trigger.
+1. INITIAL_STARS:
+   - If Signal = ⚪ NO TRADE -> ALWAYS return ⭐ (Low) or 0 stars.
+   - If Signal = 🟢/🔴 -> Base by Reward: >=101 (⭐⭐⭐⭐) | 50-100 (⭐⭐⭐) | 25-49 (⭐⭐) | <25 (⭐).
+
+2. ADJUSTMENTS (Only for Active Trades):
+   - Volume Bonus: +1 star if Entry_Strike_Vol > 2x Avg_Neighbor_Vol.
+   - Penalty: -2 stars if ZONE=TRUE + State conflicts Trigger.
+   - Penalty: -1 star if IV > 140.
 </SCORING>
 
 <OUTPUT_CONTRACT>
