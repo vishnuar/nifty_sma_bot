@@ -44,7 +44,7 @@ except ValueError:
 
 UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 NIFTY_INSTRUMENT_KEY = 'NSE_INDEX|Nifty 50'
-ATM_STRIKES_TO_FETCH = int(os.getenv("STRIKES_TO_FETCH"))
+ATM_STRIKES_TO_FETCH = 8 
 CONTRACT_API_URL = 'https://api.upstox.com/v2/option/contract'
 OPTION_CHAIN_API_URL = 'https://api.upstox.com/v2/option/chain'
 
@@ -160,7 +160,7 @@ def is_market_time() -> bool:
         return False
 
     # 9:15 AM IST is 03:45 UTC
-    market_open_utc = datetime.time(3, 30) 
+    market_open_utc = datetime.time(3, 45) 
     # 3:30 PM IST is 10:00 UTC
     market_close_utc = datetime.time(MARKET_CLOSE_HOUR_UTC, MARKET_CLOSE_MINUTE_UTC)
 
@@ -171,7 +171,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
     Step 1: Calls the /option/contract API to find the nearest Nifty expiry date.
     """
     print("1. Fetching all Nifty option contracts to find the closest expiry...")
-    
+
     headers = get_api_headers(access_token)
     params = {'instrument_key': NIFTY_INSTRUMENT_KEY}
 
@@ -192,7 +192,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
                             expiry_dates.add(expiry_str)
                     except ValueError:
                         continue
-            
+
             if expiry_dates:
                 closest_expiry = min(expiry_dates, key=lambda x: datetime.datetime.strptime(x, '%Y-%m-%d'))
                 print(f"   -> Closest Expiry Date found: {closest_expiry}")
@@ -203,7 +203,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
         else:
             print(f"   -> Error or empty response from contract API: {data.get('message', 'Unknown error')}")
             return None
-            
+
     except requests.exceptions.RequestException as e:
         print(f"   -> API Request Error in step 1: {e}")
         return None
@@ -242,59 +242,51 @@ def calculate_max_pain(option_chain_data: list) -> dict:
         "max_pain_strike": max_pain_strike,
         "max_pain_value": max_pain_value
     }
+
 def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List[Dict[str, Any]]:
     """
     Transforms the verbose Upstox API records into a simplified list 
-    containing only the fields required by the Gemini AI prompt, now including VOLUME.
+    containing only the fields required by the Gemini AI prompt.
     """
     ai_prompt_records = []
-    
+
     for item in raw_upstox_records:
         ce_data = item['call_options']
         pe_data = item['put_options']
-        
-        # --- OPEN INTEREST & VOLUME EXTRACTION ---
-        # Call Data
+
+        # --- CALCULATE CHANGE IN OI MANUALLY ---
         ce_oi_current = ce_data['market_data'].get('oi', 0)
         ce_oi_prev = ce_data['market_data'].get('prev_oi', 0)
-        ce_volume = ce_data['market_data'].get('volume', 0) # Added Volume
 
-        # Put Data
         pe_oi_current = pe_data['market_data'].get('oi', 0)
         pe_oi_prev = pe_data['market_data'].get('prev_oi', 0)
-        pe_volume = pe_data['market_data'].get('volume', 0) # Added Volume
-        
-        # --- CALCULATE CHANGE IN OI MANUALLY ---
+
+        # Delta OI = Current OI - Previous OI
         ce_change_in_oi = ce_oi_current - ce_oi_prev
         pe_change_in_oi = pe_oi_current - pe_oi_prev
-        
-        # --- BUILD STRUCTURE FOR AI PROMPT ---
+        # --- END MANUAL CALCULATION ---
+
+        # CRITICAL: This is the structure required by the AI prompt
         record = {
             "strikePrice": item.get('strike_price', 0.0),
             "expiryDate": expiry_date,
             "CE": {
                 "openInterest": ce_oi_current,
-                "changeinOpenInterest": ce_change_in_oi,
-                "volume": ce_volume,  # New field for AI analysis
-                "Delta": ce_data['option_greeks'].get('delta', 0.0),
-                "IV": ce_data['option_greeks'].get('iv', 0.0)                
+                "changeinOpenInterest": ce_change_in_oi,  # <-- FIXED
             },
             "PE": {
                 "openInterest": pe_oi_current,
-                "changeinOpenInterest": pe_change_in_oi,
-                "volume": pe_volume,  # New field for AI analysis
-                "Delta": pe_data['option_greeks'].get('delta', 0.0),
-                "IV": pe_data['option_greeks'].get('iv', 0.0)                
+                "changeinOpenInterest": pe_change_in_oi,  # <-- FIXED
             }
         }
         ai_prompt_records.append(record)
-        
+
     return ai_prompt_records
 
 
 def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strikes: int):
     """
-    Step 2: Fetches the full option chain, filters for ATM contracts , and calculates PCR/Max Pain.
+    Step 2: Fetches the full option chain, filters for ATM contracts, and calculates PCR/Max Pain.
     Returns data in the user-requested format.
     """
     print(f"2. Fetching full Option Chain for Expiry: {expiry_date}...")
@@ -316,26 +308,26 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
 
         all_strikes = [item['strike_price'] for item in chain_data['data']]
         all_strikes.sort()
-        
+
         spot_price = chain_data['data'][0].get('underlying_spot_price', 'N/A')
-        
+
         if not all_strikes:
             return {'status': 'error', 'message': 'No strike prices available.'}
-            
+
         atm_strike = min(all_strikes, key=lambda x: abs(x - spot_price))
         atm_index = all_strikes.index(atm_strike)
 
         start_index = max(0, atm_index - num_strikes)
         end_index = min(len(all_strikes), atm_index + num_strikes + 1)
-        
+
         selected_strikes_list = sorted(all_strikes[start_index:end_index])
         selected_strikes_set = set(selected_strikes_list)
-        
+
         filtered_chain = [
             item for item in chain_data['data'] 
             if item['strike_price'] in selected_strikes_set
         ]
-        
+
         total_put_oi = sum(item['put_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         total_call_oi = sum(item['call_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
@@ -390,7 +382,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the Open Interest (OI) data, volume PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation. SMA is not a signal. it is an alert only**
+**SYSTEM PROMPT: You are a highly specialized and experienced NIFTY options market analyst and strategist. Your sole function is to combine the provided technical (SMA) signal with Open Interest (OI) data, PCR, and Max Pain to generate a single, actionable, risk-managed trading recommendation.**
 
 
 Input Data:
@@ -444,7 +436,8 @@ Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP)
         response_text = _call_gemini_with_retry(
             client=client,
             model=GEMINI_MODEL,
-            contents=[                
+            contents=[
+                {"role": "user", "parts": [{"text": "You are a highly experienced NIFTY options trading decision AI. Your goal is to combine technical, PCR, Max Pain, and options data for actionable, risk-aware advice."}]},
                 {"role": "user", "parts": [{"text": user_prompt}]}
             ],
             config=genai.types.GenerateContentConfig(temperature=0.2)
