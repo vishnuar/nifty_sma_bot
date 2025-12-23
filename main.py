@@ -407,36 +407,40 @@ Option Chain Data (Filtered JSON):
 
 --- GUIDELINES AND CONSTRAINTS ---
 
-1.  **Definitions & Data Constraint:**
-    * **Resistance (TP Target):** Strong Call Option (CE) Open Interest (OI) or Change in OI build-up.
-    * **Support (SL Target for BUY/TP Target for SELL):** Strong Put Option (PE) Open Interest (OI) or Change in OI build-up.
-    * **Strike Price** and **NIFTY Price Levels (TP/SL)** MUST be selected ONLY from the strike prices provided in the 'Option Chain Data' JSON. DO NOT create a numerical value that is not present.
+1. DEFINITIONS & DATA CONSTRAINT:
+- Resistance (TP Target for BUY / SL for SELL): Strong Call Option (CE) Net OI WITH positive Change in OI (New Writing preferred).
+- Support (SL Target for BUY / TP for SELL): Strong Put Option (PE) Net OI WITH positive Change in OI (New Writing preferred).
+- Strike Price, TP, and SL MUST be selected ONLY from strike prices present in the Option Chain Data JSON.
+- DO NOT generate any numeric value outside the provided strikes.
 
-2.  **Trade Parameters (Dominance & Realism Check):**
-    * **Take Profit (TP) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the favorable direction.
-    * **TP REALISM CHECK:** If the distance between the Spot Price and the chosen **TP Target** exceeds **200 points** (the maximum reasonable intraday target), the AI MUST look for the next strongest structural barrier **closer** to the Spot Price (e.g., the 2nd highest OI concentration). This prioritizes velocity.
-    * **Stop Loss (SL) Target:** MUST be the strike with the **highest NET OI and Chg in OI** in the opposite direction, provided it offers a viable R/R ratio.   
+2. TRADE PARAMETER SELECTION (DOMINANCE & REALISM):
+- Take Profit (TP): MUST be the strike with the strongest structural barrier in trade direction, prioritized as:
+  New Writing > Net OI > Volume > Delta
+- TP REALISM CHECK: If distance between Spot Price and TP exceeds 200 points, select the next strongest structural level closer to Spot.
+- Stop Loss (SL): MUST be the strongest opposing structural level that maintains acceptable Risk/Reward.
 
-3.  **MARKET STRUCTURE ANALYSIS:**
-    * **New Writing (Conviction):** The AI must prioritize signals confirmed by new writing over other OI metrics.
+3. MARKET STRUCTURE ANALYSIS (OPTION CHAIN ONLY):
+- New Writing is the highest conviction signal.
+- SMA is ONLY a timing trigger and MUST NOT be used for trade conviction or direction.
+- PCR and Max Pain may be used ONLY as secondary confirmation and MUST NOT override OI, Volume, or Delta signals.
 
-4.  **VOLATILITY AND EXPIRY DAY RULE:**
-    * **If today's date matches the Option Expiry Date ({expiry_date}), the market is highly volatile.** Automatically apply a one-tier downgrade to the initial **Confidence Level** (e.g., Very High -> High, High -> Medium, Medium -> Low).
+4. VOLATILITY & EXPIRY RULE:
+- If today matches the Option Expiry Date ({expiry_date}), automatically downgrade Confidence by one tier due to elevated volatility.
 
-5.  **Confidence**
-    * **Confidence Level** can be: **(Very High, High, Medium, or Low).**
-    * **Tier 1 (Ultimate Risk):** If the calculated Risk/Reward (R/R) ratio is less than 1.5, the final confidence MUST be **Low**.
-    * **Tier 2 (High Conviction):** The final confidence MUST NOT be **"Very High"** unless the calculated R/R ratio is **2.5 or greater**.
-    * **Tier 3 (Standard Conviction):** The final confidence MUST NOT be **"High"** unless the calculated R/R ratio is **2.0 or greater**.
+5. CONFIDENCE RULES:
+- Confidence Levels: Very High, High, Medium, Low
+- Tier 1 (Risk Control): If Risk/Reward < 1.5 → Confidence MUST be Low
+- Tier 2 (Strong Conviction): Very High allowed ONLY if R/R ≥ 2.5
+- Tier 3 (Standard Conviction): High allowed ONLY if R/R ≥ 2.0
 
 --- REQUIRED OUTPUT FORMAT ---
 
-**Output MUST be a single, continuous line of plain text and layman words**
-**Output MUST contain ALL of the following key-value pairs in the exact order shown below.**
-**The Reason MUST be a single, concise sentence that justifies the decision by referencing the SMA, PCR, and the key OI levels used for TP/SL.**
+Output MUST be a single continuous line of plain text.
+Output MUST contain ALL fields in the exact order below.
+Reason MUST be a single concise sentence referencing Option Chain structure (OI, Change in OI, Volume, Delta). SMA may be mentioned only as a trigger, not as a decision factor.
 
-Example desired format:
-Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: SMA confirms signal, PCR 1.12 supports rally, and new PE writing at 25000 confirms conviction.
+Example format:
+Confidence: High. Signal: Buy. Strike Price: 25000. Option: CE. Take Profit (TP): 25150. Stop Loss (SL): 24900. Reason: Bullish continuation confirmed by strong PE new writing at support with dominant OI and volume, while SMA acted only as an entry alert.
 """
 
     try:
