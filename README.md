@@ -73,10 +73,10 @@ python main.py
 
 ## 🛠️ Credits & Acknowledgements
 
-Big Thanks to **Google Gemini** and without you can't make it this script
+Big Thanks to **Google Gemini** and without you i can't make this script
 
 ---
 
 ## ⚠️ Disclaimer
 
-This software is for **Please trade wisely and this tool make mistakes**...
+**Please trade wisely and this tool make mistakes**...
