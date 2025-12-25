@@ -68,3 +68,15 @@ pip install -r requirements.txt
 
 # Run the bot
 python main.py
+```
+---
+
+## 🛠️ Credits & Acknowledgements
+
+Big Thanks to **Google Gemini** and without you can't make it this script
+
+---
+
+## ⚠️ Disclaimer
+
+This software is for **Please trade wisely and this tool make mistakes**...
