@@ -390,7 +390,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-**You are a NIFTY options analyst. Generate ONE actionable trade using OI data, PCR, and Max Pain. SMA is entry timing only**
+**You are a deeply experienced NIFTY options buy analyst, like an institutional trader. Generate an actionable trade using below given Input Data with your experience in option trading in NIFTY**
 
 Input Data:
 Signal: {signal_type}
@@ -404,22 +404,9 @@ Max Pain Level: {max_pain}
 Option Chain Data (Filtered JSON):
 {option_chain_str}
 
-CRITICAL RULES:
-1. SELECTION PRIORITY: New Writing > Net OI > Volume > Delta
-2. STRIKE CONSTRAINT: Use ONLY strikes from the JSON data provided
-3. TP LIMIT: If Spot-to-TP distance > 200 pts, use next closest structural level
-4. SMA: Timing trigger only, NOT for direction conviction
-5. CONFIDENCE RULES:
-   - Very High: R/R ≥ 2.5
-   - High: R/R ≥ 2.0
-   - Medium: R/R ≥ 1.5
-   - Low: R/R < 1.5
 
 OUTPUT (single line):
 Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [1 sentence mentioning OI/Volume/Delta/New Writing structure]
-
-Example:
-Confidence: High. Signal: Buy. Strike: 25000. Option: CE. TP: 25150. SL: 24900. Reason: Strong PE new writing at support (dominant OI increase) with bullish call volume alignment; SMA triggered entry signal
 """
 
     try:
@@ -442,7 +429,6 @@ Confidence: High. Signal: Buy. Strike: 25000. Option: CE. TP: 25150. SL: 24900. 
     except Exception as e:
         logger.error(f"❌ Unexpected non-API error in AI suggestion: {e}")
         return f"Unexpected AI error: {e}"
-
 
 # ---------------------------------------------------------
 ## 🏃 MAIN EXECUTION LOOP
