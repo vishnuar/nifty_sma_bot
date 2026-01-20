@@ -148,133 +148,6 @@ def calc_sma(values: List[float], period: int) -> Optional[float]:
         return None
     return sum(values[-period:]) / period
 
-def calculate_volatility(prices: List[float], period: int = 5) -> float:
-    """
-    Calculates volatility (standard deviation of recent price changes).
-    Higher volatility = more risk = wider stops needed.
-    """
-    if len(prices) < period:
-        return 0.02  # Default 2% volatility
-    
-    recent_prices = prices[-period:]
-    returns = [(recent_prices[i] - recent_prices[i-1]) / recent_prices[i-1] 
-               for i in range(1, len(recent_prices))]
-    
-    if not returns:
-        return 0.02
-    
-    variance = sum((r - sum(returns) / len(returns)) ** 2 for r in returns) / len(returns)
-    volatility = variance ** 0.5
-    return max(0.01, min(0.05, volatility))  # Cap between 1% and 5%
-
-def calculate_trend_strength(sma9: float, sma21: float, price: float) -> Dict[str, Any]:
-    """
-    Calculates trend strength and quality metrics.
-    Better signal when SMAs are well-separated and price is properly positioned.
-    """
-    if sma21 == 0:
-        return {'strength': 'Weak', 'sma_distance': 0, 'entry_quality': 0, 'score': 0}
-    
-    # SMA separation as % of price
-    sma_distance = abs(sma9 - sma21) / sma21
-    
-    # Entry quality: how far is price from SMA9 (closer is better, avoid chasing)
-    distance_from_sma = abs(price - sma9) / sma9 if sma9 != 0 else 0
-    
-    # Strength categories (improved thresholds)
-    if sma_distance > 0.04:
-        strength = 'Very Strong'
-        strength_score = 1.0
-    elif sma_distance > 0.025:
-        strength = 'Strong'
-        strength_score = 0.75
-    elif sma_distance > 0.012:
-        strength = 'Moderate'
-        strength_score = 0.5
-    else:
-        strength = 'Weak'
-        strength_score = 0.25
-    
-    # Entry quality penalty
-    entry_quality = 1.0
-    if distance_from_sma > 0.02:  # Entry more than 2% from SMA9
-        entry_quality = 0.6  # Heavy penalty
-    elif distance_from_sma > 0.01:  # Entry 1-2% from SMA9
-        entry_quality = 0.8  # Small penalty
-    
-    # Overall quality score
-    quality_score = strength_score * entry_quality
-    
-    return {
-        'strength': strength,
-        'sma_distance': sma_distance,
-        'entry_quality': distance_from_sma,
-        'entry_quality_score': entry_quality,
-        'score': quality_score
-    }
-
-def should_execute_signal(
-    signal_type: str, 
-    sma9: float, 
-    sma21: float, 
-    price: float, 
-    volatility: float,
-    trend_info: Dict
-) -> Dict[str, Any]:
-    """
-    Enhanced signal validation before sending to Gemini.
-    Filters out low-quality signals early to save API calls.
-    """
-    
-    # 1. Check if SMAs are properly positioned
-    if signal_type == "BUY":
-        sma_valid = sma9 > sma21
-        direction = "up"
-    else:  # SELL
-        sma_valid = sma9 < sma21
-        direction = "down"
-    
-    if not sma_valid:
-        return {
-            'should_proceed': False,
-            'reason': f'SMA9 not {direction} from SMA21 - possible reversal',
-            'quality_score': 0
-        }
-    
-    # 2. Check trend strength
-    trend_score = trend_info['score']
-    if trend_score < 0.3:  # Very weak trend
-        return {
-            'should_proceed': False,
-            'reason': f'Trend too weak ({trend_info["strength"]})',
-            'quality_score': trend_score
-        }
-    
-    # 3. Check entry quality (avoid chasing)
-    if trend_info['entry_quality'] > 0.015:  # More than 1.5% from SMA
-        return {
-            'should_proceed': False,
-            'reason': f'Entry too far from SMA ({trend_info["entry_quality"]*100:.2f}%) - chasing',
-            'quality_score': trend_score * 0.5
-        }
-    
-    # 4. Check volatility extremes
-    if volatility > 0.04:  # > 4% volatility
-        return {
-            'should_proceed': True,
-            'reason': f'High volatility ({volatility*100:.1f}%) - proceed with caution',
-            'quality_score': trend_score * 0.8,
-            'volatility_warning': True
-        }
-    
-    # 5. All checks passed
-    return {
-        'should_proceed': True,
-        'reason': f'{trend_info["strength"]} trend, Good entry quality',
-        'quality_score': trend_score,
-        'volatility_warning': False
-    }
-
 def is_market_time() -> bool:
     """
     Checks if the current time is within Indian market hours (Mon-Fri, 9:15 AM - 3:30 PM IST).
@@ -298,7 +171,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
     Step 1: Calls the /option/contract API to find the nearest Nifty expiry date.
     """
     print("1. Fetching all Nifty option contracts to find the closest expiry...")
-    
+
     headers = get_api_headers(access_token)
     params = {'instrument_key': NIFTY_INSTRUMENT_KEY}
 
@@ -319,7 +192,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
                             expiry_dates.add(expiry_str)
                     except ValueError:
                         continue
-            
+
             if expiry_dates:
                 closest_expiry = min(expiry_dates, key=lambda x: datetime.datetime.strptime(x, '%Y-%m-%d'))
                 print(f"   -> Closest Expiry Date found: {closest_expiry}")
@@ -330,7 +203,7 @@ def fetch_closest_expiry(access_token: str) -> str | None:
         else:
             print(f"   -> Error or empty response from contract API: {data.get('message', 'Unknown error')}")
             return None
-            
+
     except requests.exceptions.RequestException as e:
         print(f"   -> API Request Error in step 1: {e}")
         return None
@@ -375,11 +248,11 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
     containing only the fields required by the Gemini AI prompt, now including VOLUME.
     """
     ai_prompt_records = []
-    
+
     for item in raw_upstox_records:
         ce_data = item['call_options']
         pe_data = item['put_options']
-        
+
         # --- OPEN INTEREST & VOLUME EXTRACTION ---
         # Call Data
         ce_oi_current = ce_data['market_data'].get('oi', 0)
@@ -390,11 +263,11 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
         pe_oi_current = pe_data['market_data'].get('oi', 0)
         pe_oi_prev = pe_data['market_data'].get('prev_oi', 0)
         pe_volume = pe_data['market_data'].get('volume', 0) # Added Volume
-        
+
         # --- CALCULATE CHANGE IN OI MANUALLY ---
         ce_change_in_oi = ce_oi_current - ce_oi_prev
         pe_change_in_oi = pe_oi_current - pe_oi_prev
-        
+
         # --- BUILD STRUCTURE FOR AI PROMPT ---
         record = {
             "strikePrice": item.get('strike_price', 0.0),
@@ -415,7 +288,7 @@ def normalize_upstox_records(raw_upstox_records: list, expiry_date: str) -> List
             }
         }
         ai_prompt_records.append(record)
-        
+
     return ai_prompt_records
 
 
@@ -443,26 +316,26 @@ def fetch_and_filter_option_chain(expiry_date: str, access_token: str, num_strik
 
         all_strikes = [item['strike_price'] for item in chain_data['data']]
         all_strikes.sort()
-        
+
         spot_price = chain_data['data'][0].get('underlying_spot_price', 'N/A')
-        
+
         if not all_strikes:
             return {'status': 'error', 'message': 'No strike prices available.'}
-            
+
         atm_strike = min(all_strikes, key=lambda x: abs(x - spot_price))
         atm_index = all_strikes.index(atm_strike)
 
         start_index = max(0, atm_index - num_strikes)
         end_index = min(len(all_strikes), atm_index + num_strikes + 1)
-        
+
         selected_strikes_list = sorted(all_strikes[start_index:end_index])
         selected_strikes_set = set(selected_strikes_list)
-        
+
         filtered_chain = [
             item for item in chain_data['data'] 
             if item['strike_price'] in selected_strikes_set
         ]
-        
+
         total_put_oi = sum(item['put_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         total_call_oi = sum(item['call_options'].get('market_data', {}).get('oi', 0) for item in filtered_chain)
         pcr_value = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.00
@@ -510,35 +383,25 @@ def _call_gemini_with_retry(client, model, contents, config):
     return response.text
 
 
-def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, expiry_date: str, volatility: float = 0.02, trend_info: Dict = None) -> str:
+def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: float, sma9: float, sma21: float, signal_type: str, pcr: float, max_pain: str, expiry_date: str) -> str:
     if not client:
         return "AI error: Gemini client is not initialized."
 
     option_chain_str = prepare_gemini_prompt(option_chain_data)
-    
-    # NEW: Include market quality metrics in prompt
-    trend_context = ""
-    if trend_info:
-        trend_context = f"""
-Trend Quality Metrics:
-- Trend Strength: {trend_info['strength']}
-- SMA Distance: {trend_info['sma_distance']*100:.2f}%
-- Entry Quality: {trend_info['entry_quality']*100:.2f}% from SMA9
-- Overall Quality Score: {trend_info['score']:.2f}/1.0
-"""
-    
-    volatility_context = f"""
-Market Volatility: {volatility*100:.2f}%
-- {('Low volatility → Tighter stops suitable' if volatility < 0.02 else 'Normal volatility → Standard stops' if volatility < 0.04 else 'High volatility → Wider stops recommended')}
-"""
 
-    user_prompt = f"""You are a NIFTY options analyst. Generate ONE actionable trade using OI data, PCR, and Max Pain. SMA is entry timing only.
+    user_prompt = f"""
+**You are a NIFTY options analyst. Generate ONE actionable trade using OI data, PCR, and Max Pain. SMA is entry timing only**
 
-INPUT DATA:
-Signal: {signal_type} | Spot: {price:.2f} | SMA9: {sma9:.2f} | SMA21: {sma21:.2f}
-Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()} | Expiry: {expiry_date}
-PCR: {pcr:.2f} | Max Pain: {max_pain}{trend_context}{volatility_context}
-Option Chain:
+Input Data:
+Signal: {signal_type}
+Spot Price: {price:.2f}
+SMA9: {sma9:.2f}
+SMA21: {sma21:.2f}
+Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
+Option Expiry Date: {expiry_date}
+Put-Call Ratio (PCR): {pcr:.2f}
+Max Pain Level: {max_pain}
+Option Chain Data (Filtered JSON):
 {option_chain_str}
 
 CRITICAL RULES:
@@ -556,7 +419,7 @@ OUTPUT (single line):
 Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [1 sentence mentioning OI/Volume/Delta/New Writing structure]
 
 Example:
-Confidence: High. Signal: Buy. Strike: 25000. Option: CE. TP: 25150. SL: 24900. Reason: Strong PE new writing at support (dominant OI increase) with bullish call volume alignment; SMA triggered entry signal.
+Confidence: High. Signal: Buy. Strike: 25000. Option: CE. TP: 25150. SL: 24900. Reason: Strong PE new writing at support (dominant OI increase) with bullish call volume alignment; SMA triggered entry signal
 """
 
     try:
@@ -640,33 +503,6 @@ while True:
         if signal:
             logger.critical(f"🚨 MAJOR SIGNAL DETECTED: {signal} at Price {price:.2f}")
             send_telegram(f"*🚨 Major Signal Detected: {signal}* (Price: {price:.2f})")
-            
-            # NEW: Enhanced signal validation (improved quality check)
-            volatility = calculate_volatility(state["prices"])
-            trend_info = calculate_trend_strength(sma9, sma21, price)
-            
-            validation = should_execute_signal(
-                signal_type=signal,
-                sma9=sma9,
-                sma21=sma21,
-                price=price,
-                volatility=volatility,
-                trend_info=trend_info
-            )
-            
-            if not validation['should_proceed']:
-                logger.warning(f"⚠️ Signal filtered out: {validation['reason']}")
-                send_telegram(f"*⚠️ Signal Filtered:* {validation['reason']}")
-                time.sleep(PRICE_FETCH_DELAY)
-                continue
-            
-            # Add warnings if needed
-            if validation.get('volatility_warning'):
-                logger.warning(f"⚠️ High volatility detected - wider stops recommended")
-                send_telegram(f"*⚠️ High Volatility ({volatility*100:.1f}%):* Wider stops recommended")
-            
-            logger.info(f"✅ Signal Quality Score: {validation['quality_score']:.2f} - {validation['reason']}")
-            send_telegram(f"*✅ Quality Check Passed* ({validation['reason']})")
 
             closest_expiry = fetch_closest_expiry(UPSTOX_ACCESS_TOKEN)
 
@@ -687,10 +523,8 @@ while True:
                         sma21=sma21, 
                         signal_type=signal,
                         pcr=option_chain_result['pcr'],
-                        max_pain=str(option_chain_result['max_pain']),
-                        expiry_date=closest_expiry,
-                        volatility=volatility,  # NEW
-                        trend_info=trend_info   # NEW
+                        max_pain=str(option_chain_result['max_pain'] ),
+                        expiry_date=closest_expiry
                     )
                     ai_log_message = ai_result.strip().replace('\n', ' | ')
                     logger.critical(f"🤖 AI RECOMMENDS: {ai_log_message}")
@@ -705,4 +539,3 @@ while True:
 
     except Exception as e:
         logger.exception(f"🔥 UNHANDLED ERROR IN MAIN LOOP: {e}")
-        send_telegram(f"*🔥 FATAL ERROR in Trading Bot:*\n`{e}`")
