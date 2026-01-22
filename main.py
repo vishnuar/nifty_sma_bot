@@ -390,24 +390,28 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-**You are a deeply experienced NIFTY options buy analyst, like an institutional trader. Generate an actionable trade using below given Input Data with your experience in option trading in NIFTY**
+    **ROLE:** You are a Lead Derivatives Trader specializing in Order Flow and Tape Reading. 
+    **OBJECTIVE:** Rigorously validate a {signal_type} signal by analyzing Strike-Specific dynamics. Ignore sentiment indicators; focus ONLY on Volume and Writing.
 
-Input Data:
-Signal: {signal_type}
-Spot Price: {price:.2f}
-SMA9: {sma9:.2f}
-SMA21: {sma21:.2f}
-Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-Option Expiry Date: {expiry_date}
-Put-Call Ratio (PCR): {pcr:.2f}
-Max Pain Level: {max_pain}
-Option Chain Data (Filtered JSON):
-{option_chain_str}
+    Input Data:
+    Signal: {signal_type}
+    Spot Price: {price:.2f}
+    Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
+    Option Expiry Date: {expiry_date}
+    Option Chain Data (Filtered JSON):
+    {option_chain_str}
 
+    **STRICT INSTITUTIONAL VALIDATION RULES:**
+    1. **THE WRITING GATING:** - If Signal is BUY: There MUST be significant 'changeinOpenInterest' (New Writing) on the PE side at or below Spot. If CE 'changeinOpenInterest' is higher than PE at the ATM strike, REJECT as a 'Fake-out'.
+    - If Signal is SELL: There MUST be aggressive New Writing on the CE side at or above Spot.
+    2. **VOLUME CONFIRMATION:** High volume without an increase in OI suggests day-trading noise. I require 'Volume' to be concentrated at the strikes where OI is also increasing (Institutional positioning).
+    3. **DELTA EXPOSURE:** Identify if the highest Volume/OI increase is occurring at 'In-The-Money' (ITM) or 'At-The-Money' (ATM) strikes. ITM writing indicates high conviction.
+    4. **REJECTION CRITERIA:** If you see 'Negative changeinOpenInterest' (Unwinding) on the side of the signal, downgrade confidence to LOW—this is a trend exhaustion, not a new entry.
+    5. **THE "NO TRADE" RULE:** If New Writing (changeinOI) is balanced on both sides, output 'Confidence: Low' and 'Signal: Neutral'. Do not force a trade.
 
-OUTPUT (single line):
-Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [1 sentence mentioning OI/Volume/Delta/New Writing structure]
-"""
+    **OUTPUT FORMAT (Strictly one line):**
+    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
+    """
 
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
