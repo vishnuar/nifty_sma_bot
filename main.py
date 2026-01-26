@@ -410,7 +410,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     5. **THE "NO TRADE" RULE:** If New Writing (changeinOI) is balanced on both sides or 'Unwinding' (negative COI) on the bias side, output 'Confidence: Low' and 'Signal: Neutral'. Do not force a trade.
 
     **OUTPUT FORMAT (Strictly one line):**
-    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
+    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell|Neutral]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
     """
 
     try:
