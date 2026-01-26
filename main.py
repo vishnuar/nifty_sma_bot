@@ -405,9 +405,9 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     1. **THE WRITING GATING:** - If Signal is BUY: There MUST be significant 'changeinOpenInterest' (New Writing) on the PE side at or below Spot. If CE 'changeinOpenInterest' is higher than PE at the ATM strike, REJECT as a 'Fake-out'.
     - If Signal is SELL: There MUST be aggressive New Writing on the CE side at or above Spot.
     2. **VOLUME CONFIRMATION:** High volume without an increase in OI suggests day-trading noise. I require 'Volume' to be concentrated at the strikes where OI is also increasing (Institutional positioning).
-    3. **DELTA EXPOSURE:** Identify if the highest Volume/OI increase is occurring at 'In-The-Money' (ITM) or 'At-The-Money' (ATM) strikes. ITM writing indicates high conviction.
+    3. **DELTA EXPOSURE:** Identify the strike with Delta nearest to 0.35. This is our 'High-Velocity' strike. If this strike lacks COI support, the bias is unsupported.
     4. **REJECTION CRITERIA:** If you see 'Negative changeinOpenInterest' (Unwinding) on the side of the signal, downgrade confidence to LOW—this is a trend exhaustion, not a new entry.
-    5. **THE "NO TRADE" RULE:** If New Writing (changeinOI) is balanced on both sides, output 'Confidence: Low' and 'Signal: Neutral'. Do not force a trade.
+    5. **THE "NO TRADE" RULE:** If New Writing (changeinOI) is balanced on both sides or 'Unwinding' (negative COI) on the bias side, output 'Confidence: Low' and 'Signal: Neutral'. Do not force a trade.
 
     **OUTPUT FORMAT (Strictly one line):**
     Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
