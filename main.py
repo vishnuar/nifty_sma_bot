@@ -403,17 +403,20 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     **STRICT INSTITUTIONAL VALIDATION RULES:**
     1. **SCALE SUMMATION:** Sum the 'changeinOpenInterest' (COI) for the **3 strikes above Spot** and the **3 strikes below Spot** for both CE and PE.
-    2. **THE 1.5x THRESHOLD (CONVICTION):**
-       - If {signal_type} is BUY: PE Sum / CE Sum MUST be ≥ 1.5.
-       - If {signal_type} is SELL: CE Sum / PE Sum MUST be ≥ 1.5.
-    3. **NEUTRAL CASE (NO-TRADE ZONE):** If the Ratio (PE Sum vs CE Sum) falls between **0.7 and 1.5**, output 'Confidence: Low' and 'Signal: Neutral'. Reason: 'Market is in Equilibrium/Tug-of-War'.
+        - If {signal_type} is BUY, [Current Scale Ratio]: PE Sum / CE Sum
+        - If {signal_type} is SELL, [Current Scale Ratio]: CE Sum / PE Sum    
+    2. You MUST identify the market state based on these strict rules:
+       1. **Long Buildup:** Price UP ↑ + PE COI UP ↑ (Strong Bullish)
+       2. **Short Covering:** Price UP ↑ + CE COI DOWN ↓ (Panic Bullish/Momentum)
+       3. **Short Buildup:** Price DOWN ↓ + CE COI UP ↑ (Strong Bearish)
+       4. **Long Unwinding:** Price DOWN ↓ + PE COI DOWN ↓ (Weak Bearish/Correction)
+    3. **NEUTRAL CASE (NO-TRADE ZONE):** If the Ratio (PE Sum vs CE Sum) falls between **0.7 and 1.2**, output 'Confidence: Low' and 'Signal: Neutral'. Reason: 'Market is in Equilibrium/Tug-of-War'.
     4. **VOLUME CONFIRMATION:** High volume without an increase in OI suggests day-trading noise. I require 'Volume' to be concentrated at the strikes where OI is also increasing (Institutional positioning).
     5. **DELTA EXPOSURE:** Identify the strike with Delta nearest to 0.35. This is our 'High-Velocity' strike. If this strike lacks COI support, the bias is unsupported.
     6. **REJECTION CRITERIA:** If you see 'Negative changeinOpenInterest' (Unwinding) on the side of the signal, downgrade confidence to LOW—this is a trend exhaustion, not a new entry.
    
-
     **OUTPUT FORMAT (Strictly one line):**
-    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell|Neutral]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
+    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell|Neutral]. Ratio: [Current Scale Ratio]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Must cite specific Volume/New Writing imbalance at the chosen strike vs opposing strikes]
     """
 
     try:
