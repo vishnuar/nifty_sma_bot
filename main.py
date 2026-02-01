@@ -448,10 +448,10 @@ logger.info("Starting Main Trading Bot Loop.")
 
 while True:
     try:
-        """if not is_market_time():
+        if not is_market_time():
             logger.info("Market closed or weekend. Sleeping...")
             time.sleep(MARKET_SLEEP_SECONDS)
-            continue"""
+            continue
 
         price = get_price()
         if price is None:

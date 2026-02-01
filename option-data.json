@@ -1,0 +1,308 @@
+[
+  {
+    "strikePrice": 25000.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 2572375.0,
+      "changeinOpenInterest": 15145.0,
+      "volume": 3858465,
+      "Delta": 0.773,
+      "IV": 27.24
+    },
+    "PE": {
+      "openInterest": 11600095.0,
+      "changeinOpenInterest": 4735445.0,
+      "volume": 69509700,
+      "Delta": -0.2169,
+      "IV": 26.03
+    }
+  },
+  {
+    "strikePrice": 25050.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 153790.0,
+      "changeinOpenInterest": 15145.0,
+      "volume": 603135,
+      "Delta": 0.7421,
+      "IV": 27.4
+    },
+    "PE": {
+      "openInterest": 2092415.0,
+      "changeinOpenInterest": 1063855.0,
+      "volume": 23151180,
+      "Delta": -0.2455,
+      "IV": 25.8
+    }
+  },
+  {
+    "strikePrice": 25100.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 811980.0,
+      "changeinOpenInterest": 36855.0,
+      "volume": 2776215,
+      "Delta": 0.716,
+      "IV": 26.61
+    },
+    "PE": {
+      "openInterest": 5319080.0,
+      "changeinOpenInterest": 2523170.0,
+      "volume": 41836145,
+      "Delta": -0.2765,
+      "IV": 25.59
+    }
+  },
+  {
+    "strikePrice": 25150.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 517595.0,
+      "changeinOpenInterest": 121745.0,
+      "volume": 3857230,
+      "Delta": 0.6839,
+      "IV": 26.34
+    },
+    "PE": {
+      "openInterest": 2747355.0,
+      "changeinOpenInterest": 1278355.0,
+      "volume": 23223590,
+      "Delta": -0.3096,
+      "IV": 25.33
+    }
+  },
+  {
+    "strikePrice": 25200.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 2504125.0,
+      "changeinOpenInterest": 177255.0,
+      "volume": 15359760,
+      "Delta": 0.6496,
+      "IV": 26.09
+    },
+    "PE": {
+      "openInterest": 6472895.0,
+      "changeinOpenInterest": 2439580.0,
+      "volume": 50418550,
+      "Delta": -0.346,
+      "IV": 25.27
+    }
+  },
+  {
+    "strikePrice": 25250.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 1787760.0,
+      "changeinOpenInterest": 279565.0,
+      "volume": 19108375,
+      "Delta": 0.6131,
+      "IV": 25.91
+    },
+    "PE": {
+      "openInterest": 4055090.0,
+      "changeinOpenInterest": 1856595.0,
+      "volume": 39359645,
+      "Delta": -0.3836,
+      "IV": 25.09
+    }
+  },
+  {
+    "strikePrice": 25300.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 8234330.0,
+      "changeinOpenInterest": 3073850.0,
+      "volume": 84816875,
+      "Delta": 0.5747,
+      "IV": 25.91
+    },
+    "PE": {
+      "openInterest": 9729395.0,
+      "changeinOpenInterest": 4776850.0,
+      "volume": 92468350,
+      "Delta": -0.4228,
+      "IV": 24.95
+    }
+  },
+  {
+    "strikePrice": 25350.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 4655820.0,
+      "changeinOpenInterest": 1761955.0,
+      "volume": 72411885,
+      "Delta": 0.5356,
+      "IV": 25.86
+    },
+    "PE": {
+      "openInterest": 5477355.0,
+      "changeinOpenInterest": 3231800.0,
+      "volume": 52079950,
+      "Delta": -0.4632,
+      "IV": 24.83
+    }
+  },
+  {
+    "strikePrice": 25400.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 9376055.0,
+      "changeinOpenInterest": 4971135.0,
+      "volume": 97911255,
+      "Delta": 0.4961,
+      "IV": 25.67
+    },
+    "PE": {
+      "openInterest": 6119425.0,
+      "changeinOpenInterest": 3807505.0,
+      "volume": 44791175,
+      "Delta": -0.5043,
+      "IV": 24.78
+    }
+  },
+  {
+    "strikePrice": 25450.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 4063540.0,
+      "changeinOpenInterest": 2502565.0,
+      "volume": 46509450,
+      "Delta": 0.4564,
+      "IV": 25.62
+    },
+    "PE": {
+      "openInterest": 1286545.0,
+      "changeinOpenInterest": 638495.0,
+      "volume": 9599460,
+      "Delta": -0.5455,
+      "IV": 24.72
+    }
+  },
+  {
+    "strikePrice": 25500.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 10979345.0,
+      "changeinOpenInterest": 4309370.0,
+      "volume": 89065665,
+      "Delta": 0.4175,
+      "IV": 25.71
+    },
+    "PE": {
+      "openInterest": 2519075.0,
+      "changeinOpenInterest": 735020.0,
+      "volume": 12728950,
+      "Delta": -0.5864,
+      "IV": 24.61
+    }
+  },
+  {
+    "strikePrice": 25550.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 3266575.0,
+      "changeinOpenInterest": 1598025.0,
+      "volume": 36840180,
+      "Delta": 0.3789,
+      "IV": 25.62
+    },
+    "PE": {
+      "openInterest": 411190.0,
+      "changeinOpenInterest": 191230.0,
+      "volume": 2159365,
+      "Delta": -0.6262,
+      "IV": 24.61
+    }
+  },
+  {
+    "strikePrice": 25600.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 7788365.0,
+      "changeinOpenInterest": 3706820.0,
+      "volume": 66945385,
+      "Delta": 0.3419,
+      "IV": 25.63
+    },
+    "PE": {
+      "openInterest": 730405.0,
+      "changeinOpenInterest": 195065.0,
+      "volume": 2246985,
+      "Delta": -0.6648,
+      "IV": 24.58
+    }
+  },
+  {
+    "strikePrice": 25650.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 3162315.0,
+      "changeinOpenInterest": 1345435.0,
+      "volume": 32947460,
+      "Delta": 0.3075,
+      "IV": 25.79
+    },
+    "PE": {
+      "openInterest": 296725.0,
+      "changeinOpenInterest": 144170.0,
+      "volume": 724360,
+      "Delta": -0.7037,
+      "IV": 24.29
+    }
+  },
+  {
+    "strikePrice": 25700.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 7367100.0,
+      "changeinOpenInterest": 2576665.0,
+      "volume": 53983930,
+      "Delta": 0.2737,
+      "IV": 25.76
+    },
+    "PE": {
+      "openInterest": 605930.0,
+      "changeinOpenInterest": 72995.0,
+      "volume": 595985,
+      "Delta": -0.7391,
+      "IV": 24.25
+    }
+  },
+  {
+    "strikePrice": 25750.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 2724215.0,
+      "changeinOpenInterest": 1183910.0,
+      "volume": 24811605,
+      "Delta": 0.2424,
+      "IV": 25.8
+    },
+    "PE": {
+      "openInterest": 139230.0,
+      "changeinOpenInterest": 22685.0,
+      "volume": 155285,
+      "Delta": -0.7754,
+      "IV": 23.86
+    }
+  },
+  {
+    "strikePrice": 25800.0,
+    "expiryDate": "2026-02-03",
+    "CE": {
+      "openInterest": 7587645.0,
+      "changeinOpenInterest": 2328950.0,
+      "volume": 53756755,
+      "Delta": 0.2137,
+      "IV": 25.88
+    },
+    "PE": {
+      "openInterest": 712855.0,
+      "changeinOpenInterest": 40365.0,
+      "volume": 390455,
+      "Delta": -0.8036,
+      "IV": 24.08
+    }
+  }
+]
