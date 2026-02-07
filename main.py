@@ -411,9 +411,9 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     - **Neutral:** Mixed COI or Flat Price (±0.05%).
 
     2. **CONVICTION GATING:**
-    - **BUY:** Must be 'Long Buildup'/'Short Covering'. Reject if IV spikes >2%.
-    - **SELL:** Must be 'Short Buildup'/'Long Unwinding' + IV Rising.
-    - **Slow Drift:** Force 'Neutral' Signal + 'Low' Confidence.
+    - **BUY:** Must be 'Long Buildup'/'Short Covering'. Reject if IV spikes >2%. Option MUST be **CE**
+    - **SELL:** Must be 'Short Buildup'/'Long Unwinding' + IV Rising. Option MUST be **PE**
+    - **Slow Drift:** Force 'Neutral' Signal + 'Low' Confidence. Option MUST be **PE**
     - **Conflict:** If Signal is BUY but state is 'Short Buildup' (Massive Cluster CE Writing) OR Signal is SELL but state is 'Long Buildup' (Massive Cluster PE Writing) -> Force 'Neutral'.
 
     3. **0.35 DELTA:** Identify strike with Delta ~0.35. Reject if COI at this strike opposes {signal_type} (e.g., BUY vs Negative PE COI).
