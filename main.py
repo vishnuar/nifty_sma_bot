@@ -401,22 +401,25 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     Option Chain Data (Filtered JSON):
     {option_chain_str}
 
-    **STRICT VALIDATION RULES:**
-    1. **MARKET STATE IDENTIFICATION:** You MUST categorize the current state for the **Spot ±3 strikes** cluster:
-    - **Long Buildup:** Price UP ↑ + PE COI is Positive (+). (Bullish Strength)
-    - **Short Covering:** Price UP ↑ + CE COI is Negative (-). (Bullish Panic/Squeeze)
-    - **Short Buildup:** Price DOWN ↓ + CE COI is Positive (+). (Bearish Strength)
-    - **Long Unwinding:** Price DOWN ↓ + PE COI is Negative (-). (Bearish Weakness)
-    - **Neutral:** Price is Flat (±0.05%) OR COI changes are insignificant/mixed.
-    2. **CONVICTION GATING:**
-    - For a **BUY** signal: State MUST be 'Long Buildup' or 'Short Covering'.
-    - For a **SELL** signal: State MUST be 'Short Buildup' or 'Long Unwinding'.
-    - If the state opposes the signal (e.g., Signal is BUY but state is Short Buildup), set Signal to 'Neutral' and Confidence to 'Low'.
-    3. **VOLUME CHECK:** Confirm that high trading volume aligns with the strikes showing the strongest COI change.
-    4. **DELTA SELECTION:** Identify the strike with Delta nearest to 0.35. If this strike shows 'Unwinding' (Negative COI) against your signal direction, reject the trade.
+    **STRICT RULES:**
+    1. **STATES (Spot ±3 strikes):**
+    - **Long Buildup:** Price UP + PE COI(+) + IV Stable/Down.
+    - **Short Covering:** Price UP + CE COI(-) + IV Down.
+    - **Short Buildup:** Price DOWN + CE COI(+) + IV Up.
+    - **Long Unwinding:** Price DOWN + PE COI(-) + IV Up.
+    - **Slow Drift:** Price DOWN + IV Falling/Stable (Reject SELL).
+    - **Neutral:** Mixed COI or Flat Price (±0.05%).
 
-    **OUTPUT FORMAT (Strictly one line):**
-    Confidence: [Very High|High|Medium|Low]. Signal: [Buy|Sell|Neutral]. State: [Market State]. Strike: [price]. Option: [CE|PE]. TP: [price]. SL: [price]. Reason: [Briefly explain the Price vs COI logic for the chosen state]
+    2. **CONVICTION GATING:**
+    - **BUY:** Must be 'Long Buildup'/'Short Covering'. Reject if IV spikes >2%.
+    - **SELL:** Must be 'Short Buildup'/'Long Unwinding' + IV Rising.
+    - **Slow Drift:** Force 'Neutral' Signal + 'Low' Confidence.
+    - **Conflict:** If Signal is BUY but state is 'Short Buildup' (Massive Cluster CE Writing) OR Signal is SELL but state is 'Long Buildup' (Massive Cluster PE Writing) -> Force 'Neutral'.
+
+    3. **0.35 DELTA:** Identify strike with Delta ~0.35. Reject if COI at this strike opposes {signal_type} (e.g., BUY vs Negative PE COI).
+
+    **OUTPUT (One line):**
+    Confidence: [V.High|High|Med|Low]. Signal: [Buy|Sell|Neutral]. State: [State]. Strike: [Price]. Option: [CE|PE]. TP: [Price]. SL: [Price]. Reason: [Concise Price/COI/IV logic]
     """
 
     try:
