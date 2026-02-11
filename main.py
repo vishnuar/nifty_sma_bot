@@ -390,7 +390,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    **ROLE:** Senior Derivatives Strategist (Tape Reading Expert).
+    **ROLE:** Senior Derivatives Strategist in Option Buying (Tape Reading Expert).
     **OBJECTIVE:** Validate {signal_type} using the provided Option Chain data.
 
     **STRICT TRADING FRAMEWORK:**
