@@ -395,7 +395,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     **STRICT TRADING FRAMEWORK:**
     1. Use COI and Price Action to identify the state (Long Buildup, Short Covering, etc.).
-    2. Ensure Signal/Option alignment: BUY=CE, SELL=PE. 
+    2. Always output signals for an Option Buyer: If Bearish, suggest BUY PE. If Bullish, suggest BUY CE. 
     3. Validate via 0.35 Delta and Cluster Writing (±3 strikes).
     4. Reject signals if IV spikes >2% or if the market is in a 'Slow Drift' state.    
 
