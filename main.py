@@ -390,8 +390,14 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    **ROLE:** You are a Lead Derivatives Trader specializing in Order Flow and Tape Reading. 
-    **OBJECTIVE:** Rigorously validate a {signal_type} signal by analyzing Strike-Specific dynamics. Ignore sentiment indicators; focus ONLY on Volume and Writing.
+    **ROLE:** Senior Derivatives Strategist (Tape Reading Expert).
+    **OBJECTIVE:** Validate {signal_type} using the provided Option Chain data.
+
+    **STRICT TRADING FRAMEWORK:**
+    1. Use COI and Price Action to identify the state (Long Buildup, Short Covering, etc.).
+    2. Ensure Signal/Option alignment: BUY=CE, SELL=PE. 
+    3. Validate via 0.35 Delta and Cluster Writing (±3 strikes).
+    4. Reject signals if IV spikes >2% or if the market is in a 'Slow Drift' state.    
 
     Input Data:
     Signal: {signal_type}
@@ -401,25 +407,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     Option Chain Data (Filtered JSON):
     {option_chain_str}
 
-    **STRICT RULES:**
-    1. **STATES (Spot ±3 strikes):**
-    - **Long Buildup:** Price UP + PE COI(+) + IV Stable/Down.
-    - **Short Covering:** Price UP + CE COI(-) + IV Down.
-    - **Short Buildup:** Price DOWN + CE COI(+) + IV Up.
-    - **Long Unwinding:** Price DOWN + PE COI(-) + IV Up.
-    - **Slow Drift:** Price DOWN + IV Falling/Stable (Reject SELL).
-    - **Neutral:** Mixed COI or Flat Price (±0.05%).
-
-    2. **CONVICTION GATING:**
-    - **BUY:** Must be 'Long Buildup'/'Short Covering'. Reject if IV spikes >2%. Option MUST be **CE**
-    - **SELL:** Must be 'Short Buildup'/'Long Unwinding' + IV Rising. Option MUST be **PE**
-    - **Slow Drift:** Force 'Neutral' Signal + 'Low' Confidence. Option MUST be **PE**
-    - **Conflict:** If Signal is BUY but state is 'Short Buildup' (Massive Cluster CE Writing) OR Signal is SELL but state is 'Long Buildup' (Massive Cluster PE Writing) -> Force 'Neutral'.
-
-    3. **0.35 DELTA:** Identify strike with Delta ~0.35. Reject if COI at this strike opposes {signal_type} (e.g., BUY vs Negative PE COI).
-
-    **OUTPUT (One line):**
-    Confidence: [V.High|High|Med|Low]. Signal: [Buy|Sell|Neutral]. State: [State]. Strike: [Price]. Option: [CE|PE]. TP: [Price]. SL: [Price]. Reason: [Concise Price/COI/IV logic]
+    **OUTPUT:** Provide a one-line validation (Confidence, Signal, State, Strike, Option, TP, SL, and a technical Reason).
     """
 
     try:
