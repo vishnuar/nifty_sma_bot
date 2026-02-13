@@ -390,8 +390,8 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    **ROLE:** Senior Institutional Derivatives Strategist (Order Flow & Tape Reading Expert).
-    **MISSION:** Thoroughly validate or reject the following {signal_type} signal based on raw market data.
+    Role: Institutional Option Buyer (Tape Reading Specialist). 
+    Task: Validate or Reject {signal_type} for an Option BUYING strategy only.
 
     **YOUR AUTHORITY:**
     You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
@@ -411,7 +411,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     {option_chain_str}
 
     **YOUR RESPONSE:**
-    Explain your strategy in one line with your verdict. If you accept, provide the Strike, Entry, TP, and SL. If you reject, explain exactly what you saw in the data that made you stay out.
+    One-line Verdict & Strategy. If you accept, provide the Strike, Entry, TP, and SL. If you reject, explain exactly what you saw in the data that made you stay out.
     """
 
     try:
