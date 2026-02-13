@@ -390,14 +390,17 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    **ROLE:** Senior Derivatives Strategist in Option Buying (Tape Reading Expert).
-    **OBJECTIVE:** Validate {signal_type} using the provided Option Chain data.
+    **ROLE:** Senior Institutional Derivatives Strategist (Order Flow & Tape Reading Expert).
+    **MISSION:** Thoroughly validate or reject the following {signal_type} signal based on raw market data.
 
-    **STRICT TRADING FRAMEWORK:**
-    1. Use COI and Price Action to identify the state (Long Buildup, Short Covering, etc.).
-    2. Always output signals for an Option Buyer: If Bearish, suggest BUY PE. If Bullish, suggest BUY CE. 
-    3. Validate via 0.35 Delta and Cluster Writing (±3 strikes).
-    4. Reject signals if IV spikes >2% or if the market is in a 'Slow Drift' state.    
+    **YOUR AUTHORITY:**
+    You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
+
+    **THINGS YOU MUST ANALYZE:**
+    - The "Battleground": Look at the ATM ±4 strikes. Who is dominating—the writers or the unwinders?
+    - The "Wall": Is there a massive institutional ceiling or floor that makes this signal high-risk?
+    - Volatility (IV): Is there panic (IV spike), accumulation (stable IV), or a "Slow Drift" that will kill the option premium?
+    - Strike Selection: Identify the optimal strike (aiming for ~0.35 Delta) if you accept the trade. 
 
     Input Data:
     Signal: {signal_type}
@@ -407,7 +410,8 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     Option Chain Data (Filtered JSON):
     {option_chain_str}
 
-    **OUTPUT:** Provide a one-line validation (Confidence, Signal, State, Strike, Option, TP, SL, and a technical Reason).
+    **YOUR RESPONSE:**
+    Explain your strategy. If you accept, provide the Strike, Entry, TP, and SL. If you reject, explain exactly what you saw in the data that made you stay out.
     """
 
     try:
