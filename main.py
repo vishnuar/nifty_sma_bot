@@ -390,8 +390,8 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    Role: Institutional Option Buyer (Tape Reading Specialist). 
-    Task: Validate or Reject {signal_type} for an Option BUYING strategy only.
+    **ROLE:** Institutional Option Buyer (Tape Reading Specialist). 
+    **TASK:** 1-Sentence Verdict + Short Bullet-Point Validation for {signal_type}.
 
     **YOUR AUTHORITY:**
     You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
