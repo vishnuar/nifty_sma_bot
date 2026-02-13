@@ -411,7 +411,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     {option_chain_str}
 
     **YOUR RESPONSE:**
-    Explain your strategy in one or two lines with your verdict. If you accept, provide the Strike, Entry, TP, and SL. If you reject, explain exactly what you saw in the data that made you stay out.
+    Explain your strategy in one line with your verdict. If you accept, provide the Strike, Entry, TP, and SL. If you reject, explain exactly what you saw in the data that made you stay out.
     """
 
     try:
