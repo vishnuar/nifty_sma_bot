@@ -396,12 +396,6 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     **YOUR AUTHORITY:**
     You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision in 1 line only.
 
-    **THINGS YOU MUST ANALYZE:**
-    - The "Battleground": Look at the ATM ±4 strikes. Who is dominating—the writers or the unwinders?
-    - The "Wall": Is there a massive institutional ceiling or floor that makes this signal high-risk?
-    - Volatility (IV): Is there panic (IV spike), accumulation (stable IV), or a "Slow Drift" that will kill the option premium?
-    - Strike Selection: Identify the optimal strike (aiming for ~0.35 Delta) if you accept the trade. 
-
     Input Data:
     Signal: {signal_type}
     Spot Price: {price:.2f}
