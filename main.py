@@ -394,7 +394,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     **TASK:** 1-Sentence Verdict + Short Bullet-Point Validation for {signal_type}.
 
     **YOUR AUTHORITY:**
-    You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
+    You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision in 1 line only.
 
     **THINGS YOU MUST ANALYZE:**
     - The "Battleground": Look at the ATM ±4 strikes. Who is dominating—the writers or the unwinders?
