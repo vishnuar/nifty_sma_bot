@@ -390,37 +390,29 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-    **ROLE:** You are a Lead Derivatives Trader specializing in Order Flow and Tape Reading. 
-    **OBJECTIVE:** Rigorously validate a {signal_type} signal by analyzing Strike-Specific dynamics. Ignore sentiment indicators; focus ONLY on Volume and Writing.
+        **ROLE:** You are an elite Derivatives Quantitative Strategist.
+        **CONTEXT:** A technical SMA crossover has triggered a initial '{signal_type}' trend at Spot Price {price:.2f}.
 
-    Input Data:
-    Signal: {signal_type}
-    Spot Price: {price:.2f}
-    Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
-    Option Expiry Date: {expiry_date}
-    Option Chain Data (Filtered JSON):
-    {option_chain_str}
+        Input Data:
+        Signal: {signal_type}
+        Spot Price: {price:.2f}
+        Current UTC Date: {datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
+        Option Expiry Date: {expiry_date}
+        Option Chain Data (Filtered JSON):
+        {option_chain_str}
 
-    **STRICT RULES:**
-    1. **STATES (Spot ±3 strikes):**
-    - **Long Buildup:** Price UP + PE COI(+) + IV Stable/Down.
-    - **Short Covering:** Price UP + CE COI(-) + IV Down.
-    - **Short Buildup:** Price DOWN + CE COI(+) + IV Up.
-    - **Long Unwinding:** Price DOWN + PE COI(-) + IV Up.
-    - **Slow Drift:** Price DOWN + IV Falling/Stable (Reject SELL).
-    - **Neutral:** Mixed COI or Flat Price (±0.05%).
+        **TASK:** Thoroughly interrogate this technical signal using the provided Option Chain data. Do not blindly follow the '{signal_type}' label. Instead, look for confirmation or divergence in:
+        1. **OI Dynamics:** Are writers (sellers) supporting this move or trapped? Look for Short Covering vs. Fresh Writing.
+        2. **Volume Spikes:** Where is the active money flowing relative to the strike?
+        3. **IV Skew:** Does the Implied Volatility suggest panic, hedging, or complacency?
+        4. **Delta Alignment:** Check the ~0.35 Delta strikes to see if the 'smart money' is positioning for a continuation.
 
-    2. **CONVICTION GATING:**
-    - **BUY:** Must be 'Long Buildup'/'Short Covering'. Reject if IV spikes >2%.
-    - **SELL:** Must be 'Short Buildup'/'Long Unwinding' + IV Rising.
-    - **Slow Drift:** Force 'Neutral' Signal + 'Low' Confidence.
-    - **Conflict:** If Signal is BUY but state is 'Short Buildup' (Massive Cluster CE Writing) OR Signal is SELL but state is 'Long Buildup' (Massive Cluster PE Writing) -> Force 'Neutral'.
+        **DECISION:**
+        Determine if the signal is **Valid**, **False**, or **Neutral (No Edge)**.
 
-    3. **0.35 DELTA:** Identify strike with Delta ~0.35. Reject if COI at this strike opposes {signal_type} (e.g., BUY vs Negative PE COI).
-
-    **OUTPUT (One line):**
-    Confidence: [V.High|High|Med|Low]. Signal: [Buy|Sell|Neutral]. State: [State]. Strike: [Price]. Option: [CE|PE]. TP: [Price]. SL: [Price]. Reason: [Concise Price/COI/IV logic]
-    """
+        **OUTPUT FORMAT (Strictly one line):**
+        Verdict: [Valid|False|Neutral]. Confidence: [0-100%]. Signal: [Buy|Sell|No Trade]. State: [e.g., Short Covering/Long Buildup/Trap]. Strike: [Price]. Option: [CE/PE]. Reason: [Provide a high-level data-driven justification for why you agree or disagree with the technical signal].
+        """
 
     try:
         logger.info("Starting Gemini API call (up to 5 attempts with backoff)...")
