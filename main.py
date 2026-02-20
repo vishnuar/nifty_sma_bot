@@ -390,7 +390,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     option_chain_str = prepare_gemini_prompt(option_chain_data)
 
     user_prompt = f"""
-        **ROLE:** You are an elite Derivatives Quantitative Strategist.
+        **ROLE:** You are an elite Derivatives Quantitative Strategist in Option Buyiung.
         **CONTEXT:** A technical SMA crossover has triggered a initial '{signal_type}' trend at Spot Price {price:.2f}.
 
         Input Data:
@@ -401,11 +401,8 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
         Option Chain Data (Filtered JSON):
         {option_chain_str}
 
-        **TASK:** Thoroughly interrogate this technical signal using the provided Option Chain data. Do not blindly follow the '{signal_type}' label. Instead, look for confirmation or divergence in:
-        1. **OI Dynamics:** Are writers (sellers) supporting this move or trapped? Look for Short Covering vs. Fresh Writing.
-        2. **Volume Spikes:** Where is the active money flowing relative to the strike?
-        3. **IV Skew:** Does the Implied Volatility suggest panic, hedging, or complacency?
-        4. **Delta Alignment:** Check the ~0.35 Delta strikes to see if the 'smart money' is positioning for a continuation.
+        **YOUR AUTHORITY:**
+        You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
 
         **DECISION:**
         Determine if the signal is **Valid**, **False**, or **Neutral (No Edge)**.
