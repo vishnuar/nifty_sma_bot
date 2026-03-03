@@ -401,14 +401,14 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
         Option Chain Data (Filtered JSON):
         {option_chain_str}
 
-        **YOUR AUTHORITY:**
-        You have full autonomy. You may accept the trade if the institutional order flow (COI, Volume, IV) supports the move, or you may reject it if you detect a "trap," lack of conviction, or unfavorable risk-reward dynamics. Do not follow a rigid output format; instead, provide a plain-English strategic explanation of your decision.
+        **YOUR MISSION:**
+        Independently audit this signal. Do not look for confirmation of the trend; look for the ground truth of the market. You have total autonomy to accept, reject, or pivot based on your own internal synthesis of the provided data.         
 
-        **DECISION:**
-        Determine if the signal is **Valid**, **False**, or **Neutral (No Edge)**.
+        **THINKING PROCESS:**
+        Use your internal knowledge of market microstructure to analyze the "Tape." Weigh the importance of Open Interest shifts against Volume velocity. Consider the Implied Volatility surface. Determine if the current technical signal is a genuine institutional move or a trap designed to capture retail liquidity.
 
-        **OUTPUT FORMAT (Strictly one line):**
-        Verdict: [Valid|False|Neutral]. Confidence: [0-100%]. Signal: [Buy|Sell|No Trade]. State: [e.g., Short Covering/Long Buildup/Trap]. Strike: [Price]. Option: [CE/PE]. Reason: [Provide a high-level data-driven justification for why you agree or disagree with the technical signal].
+        **DECISION & OUTPUT (Strictly one line):**
+        Verdict: [Valid|False|Neutral]. Confidence: [0-100%]. Signal: [Buy|Sell|Stay Cash]. State: [Your own classification of the current market regime]. Strike: [Price]. Option: [CE|PE]. Reason: [A high-level strategic explanation of your decision-making logic].
         """
 
     try:
