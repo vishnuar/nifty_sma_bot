@@ -9,6 +9,7 @@ from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_excep
 from google import genai
 from google.genai.errors import APIError
 from typing import Dict, Any, List, Optional
+import threading
 
 # ---------------------------------------------------------
 ## ⚙️ LOGGING SETUP (Console Only)
@@ -391,7 +392,7 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
 
     user_prompt = f"""
         **ROLE:** You are an elite Derivatives Quantitative Strategist in Option Buyiung.
-        **CONTEXT:** A technical SMA crossover has triggered a initial '{signal_type}' trend at Spot Price {price:.2f}.
+        **CONTEXT:** A trend evaluation for a '{signal_type}' structure has been initiated at Spot Price {price:.2f}.
 
         Input Data:
         Signal: {signal_type}
@@ -431,11 +432,95 @@ def get_ai_trade_suggestion(option_chain_data: List[Dict[str, Any]], price: floa
     except Exception as e:
         logger.error(f"❌ Unexpected non-API error in AI suggestion: {e}")
         return f"Unexpected AI error: {e}"
+    
+def handle_on_demand_telegram():
+    """Background listener that wakes up for 'Buy?' or 'Sell?' queries using pure live metrics."""
+    if not BOT_TOKEN:
+        logger.error("Telegram token missing. Background listener disabled.")
+        return
+
+    logger.info("🤖 Background Telegram Listener Started (Pure Real-Time Mode)...")
+    offset = 0
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+
+    while True:
+        try:
+            params = {"offset": offset, "timeout": 30}
+            r = requests.get(url, params=params)
+            if r.status_code != 200:
+                time.sleep(5)
+                continue
+
+            res = r.json()
+            if not res.get("ok") or not res.get("result"):
+                continue
+
+            for update in res["result"]:
+                offset = update["update_id"] + 1
+                message = update.get("message", {})
+                text = message.get("text", "").strip()
+                chat_id = str(message.get("chat", {}).get("id", ""))
+
+                # Filter by verified chat ID if configured
+                if CHAT_ID and chat_id != str(CHAT_ID):
+                    continue
+
+                if text.lower() in ["buy?", "sell?"]:
+                    signal_type = "BUY" if text.lower() == "buy?" else "SELL"
+                    send_telegram(f"⚡ Manual Request received. Fetching live spot and option matrix chain data...")
+
+                    # 1. Fetch current price right now from Yahoo
+                    price = get_price()
+                    if price is None:
+                        send_telegram("❌ Cannot fulfill request. Live spot price data is currently unavailable.")
+                        continue
+
+                  # 2. Get SMA
+                    prices_snapshot = state.get("prices", [])[:]
+                    sma9 = calc_sma(prices_snapshot, 9)
+                    sma21 = calc_sma(prices_snapshot, 21)                 
+
+                    # 3. Get closest expiration schedule
+                    expiry = fetch_closest_expiry(UPSTOX_ACCESS_TOKEN)
+                    if not expiry:
+                        send_telegram("❌ Unable to pinpoint closest expiration contracts from Upstox.")
+                        continue
+
+                    # 4. Pull fresh option structural data matrix
+                    chain_data = fetch_and_filter_option_chain(
+                        expiry_date=expiry,
+                        access_token=UPSTOX_ACCESS_TOKEN,
+                        num_strikes=ATM_STRIKES_TO_FETCH
+                    )
+
+                    # 5. Invoke AI Engine immediately bypassing historical calculations
+                    if chain_data and chain_data.get('records'):
+                        ai_result = get_ai_trade_suggestion(
+                            option_chain_data=chain_data['records'], 
+                            price=price, 
+                            sma9=sma9,   
+                            sma21=sma21,  
+                            signal_type=signal_type,
+                            pcr=chain_data['pcr'],
+                            max_pain=str(chain_data['max_pain']),
+                            expiry_date=expiry
+                        )
+                        send_telegram(f"*🤖 On-Demand AI Analysis ({signal_type}):*\n" + ai_result)
+                    else:
+                        send_telegram("❌ Option chain parsing failed. Aborting demand strategy check.")
+
+        except Exception as e:
+            logger.error(f"Error in background Telegram listener thread: {e}")
+            time.sleep(5)    
 
 # ---------------------------------------------------------
 ## 🏃 MAIN EXECUTION LOOP
 # ---------------------------------------------------------
 state = load_state()
+
+telegram_thread = threading.Thread(target=handle_on_demand_telegram, daemon=True)
+telegram_thread.start()
+
 logger.info("Starting Main Trading Bot Loop.")
 
 while True:
