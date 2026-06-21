@@ -469,31 +469,37 @@ def handle_on_demand_telegram():
                     signal_type = "BUY" if text.lower() == "buy?" else "SELL"
                     send_telegram(f"⚡ Manual Request received. Fetching live spot and option matrix chain data...")
 
-                    # 1. Fetch current price right now from Yahoo
+                    # 1. Checking market time.
+                    if not is_market_time():
+                        logger.warning("On-Demand query skipped: Market closed or weekend.")
+                        send_telegram("⏳ *Market is currently closed.* On-demand strategy analysis can only be executed during live trading hours (9:15 AM - 3:30 PM IST).")
+                        continue # Moves directly to the next message in line without pausing the thread!
+
+                    # 2. Fetch current price right now from Yahoo
                     price = get_price()
                     if price is None:
                         send_telegram("❌ Cannot fulfill request. Live spot price data is currently unavailable.")
                         continue
 
-                  # 2. Get SMA
+                    # 3. Get SMA
                     prices_snapshot = state.get("prices", [])[:]
                     sma9 = calc_sma(prices_snapshot, 9)
                     sma21 = calc_sma(prices_snapshot, 21)                 
 
-                    # 3. Get closest expiration schedule
+                    # 4. Get closest expiration schedule
                     expiry = fetch_closest_expiry(UPSTOX_ACCESS_TOKEN)
                     if not expiry:
                         send_telegram("❌ Unable to pinpoint closest expiration contracts from Upstox.")
                         continue
 
-                    # 4. Pull fresh option structural data matrix
+                    # 5. Pull fresh option structural data matrix
                     chain_data = fetch_and_filter_option_chain(
                         expiry_date=expiry,
                         access_token=UPSTOX_ACCESS_TOKEN,
                         num_strikes=ATM_STRIKES_TO_FETCH
                     )
 
-                    # 5. Invoke AI Engine immediately bypassing historical calculations
+                    # 6. Invoke AI Engine immediately bypassing historical calculations
                     if chain_data and chain_data.get('records'):
                         ai_result = get_ai_trade_suggestion(
                             option_chain_data=chain_data['records'], 
