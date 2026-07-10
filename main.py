@@ -120,19 +120,33 @@ def get_price() -> Optional[float]:
     return p
 
 def load_state() -> Dict[str, Any]:
-    """Loads price history and last signal from state file."""
+    """Loads price history and checks if a new day requires resetting signal locks."""
+    default_state = {"last_signal": None, "prices": [], "last_state_clear_date": None}
+    
     if not os.path.exists(STATE_FILE):
         logger.info("State file not found. Initializing new state.")
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
+        return default_state
+        
     try:
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
-            state.setdefault("last_state_clear_date", None)
-            logger.info(f"State loaded successfully. Last signal: {state.get('last_signal')}")
-            return state
+            
+        state.setdefault("last_state_clear_date", None)
+        state.setdefault("prices", [])
+        state.setdefault("last_signal", None)
+        
+        # Check if it's a new day to execute the intraday clean-slate sequence
+        today_str = datetime.datetime.now().date().isoformat()
+        if state["last_state_clear_date"] != today_str:
+            logger.info("🌅 New trading day detected! Flushing old signals, keeping price data for SMAs.")
+            state["last_signal"] = None
+            state["last_state_clear_date"] = today_str
+            
+        logger.info(f"State loaded successfully. Active Trend Memory: {state.get('last_signal')}")
+        return state
     except Exception as e:
         logger.error(f"❌ Error loading state file, resetting state: {e}")
-        return {"last_signal": None, "prices": [], "last_state_clear_date": None}
+        return default_state
 
 def save_state(state: Dict[str, Any]):
     """Saves price history and last signal to state file."""
